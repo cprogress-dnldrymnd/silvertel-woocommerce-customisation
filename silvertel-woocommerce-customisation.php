@@ -88,14 +88,36 @@ class Silvertell_Woocommerce_Customisation
 
     public function add_custom_product_data_tabs($tabs)
     {
-        $tabs['buy_samples'] = ['label' => __('Buy Samples', 'silvertell-wc-customisation'), 'target' => 'silvertell_buy_samples_data', 'class' => ['show_if_simple', 'show_if_variable'], 'priority' => 80];
+        // Define all native product types so WooCommerce never hides the tabs when switching types
+        $all_types = ['show_if_simple', 'show_if_variable', 'show_if_external', 'show_if_grouped'];
 
-        // Add targeted CSS classes to the tabs so our JS can dynamically hide/show them
-        $tabs['documents']   = ['label' => __('Documents', 'silvertell-wc-customisation'), 'target' => 'silvertell_documents_data', 'class' => ['show_if_simple', 'show_if_variable', 'dd-tab-docs'], 'priority' => 81];
-        $tabs['features']    = ['label' => __('Features', 'silvertell-wc-customisation'), 'target' => 'silvertell_features_data', 'class' => ['show_if_simple', 'show_if_variable', 'dd-tab-feats'], 'priority' => 82];
+        $tabs['buy_samples'] = [
+            'label'    => __('Buy Samples', 'silvertell-wc-customisation'),
+            'target'   => 'silvertell_buy_samples_data',
+            'class'    => $all_types,
+            'priority' => 80
+        ];
 
-        // The New Evaluation Boards Tab
-        $tabs['eval_board']  = ['label' => __('Eval Board Data', 'silvertell-wc-customisation'), 'target' => 'silvertell_eval_board_data', 'class' => ['show_if_simple', 'show_if_variable', 'dd-tab-eval'], 'priority' => 83];
+        $tabs['documents']   = [
+            'label'    => __('Documents', 'silvertell-wc-customisation'),
+            'target'   => 'silvertell_documents_data',
+            'class'    => array_merge($all_types, ['dd-tab-docs']),
+            'priority' => 81
+        ];
+
+        $tabs['features']    = [
+            'label'    => __('Features', 'silvertell-wc-customisation'),
+            'target'   => 'silvertell_features_data',
+            'class'    => array_merge($all_types, ['dd-tab-feats']),
+            'priority' => 82
+        ];
+
+        $tabs['eval_board']  = [
+            'label'    => __('Eval Board Data', 'silvertell-wc-customisation'),
+            'target'   => 'silvertell_eval_board_data',
+            'class'    => array_merge($all_types, ['dd-tab-eval']),
+            'priority' => 83
+        ];
 
         return $tabs;
     }

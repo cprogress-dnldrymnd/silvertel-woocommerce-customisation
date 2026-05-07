@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, conditional UI sections, and dynamic sample provider settings.
- * Version: 2.9.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, conditional UI sections, dynamic sample providers, and custom linked products.
+ * Version: 2.10.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -31,9 +31,18 @@ class Silvertell_Woocommerce_Customisation
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
+
+        // Custom Tabs
         add_filter('woocommerce_product_data_tabs', [$this, 'add_custom_product_data_tabs']);
         add_action('woocommerce_product_data_panels', [$this, 'render_custom_product_data_panels']);
+
+        // Linked Products Panel
+        add_action('woocommerce_product_options_related', [$this, 'add_linked_eval_board_field']);
+
+        // Data Saving
         add_action('woocommerce_process_product_meta', [$this, 'save_custom_product_data']);
+
+        // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_core_assets']);
     }
@@ -203,6 +212,51 @@ class Silvertell_Woocommerce_Customisation
         return $tabs;
     }
 
+    /**
+     * Injects the custom Linked Eval Board field into the Linked Products tab.
+     */
+    public function add_linked_eval_board_field()
+    {
+        global $post;
+
+        // Hide field if the product has a parent
+        if ($post->post_parent > 0) {
+            return;
+        }
+
+        // Fetch all products categorized under Evaluation Boards
+        $eval_slug   = get_option('silvertell_eval_category_slug', 'evaluation-boards');
+        $eval_boards = wc_get_products([
+            'category' => [$eval_slug],
+            'limit'    => -1,
+            'status'   => 'publish',
+            'return'   => 'objects'
+        ]);
+
+        // Compile the dropdown options array
+        $options = ['' => __('Select an Evaluation Board...', 'silvertell-wc-customisation')];
+        if (! empty($eval_boards)) {
+            foreach ($eval_boards as $board) {
+                // Prevent a product from linking to itself
+                if ($board->get_id() === $post->ID) continue;
+                $options[$board->get_id()] = $board->get_name() . ' (#' . $board->get_id() . ')';
+            }
+        }
+
+        echo '<div class="options_group">';
+
+        woocommerce_wp_select([
+            'id'          => '_linked_eval_board',
+            'label'       => __('Evaluation Board', 'silvertell-wc-customisation'),
+            'options'     => $options,
+            'class'       => 'wc-enhanced-select', // Automatically triggers WooCommerce SelectWoo (Searchable UI)
+            'desc_tip'    => true,
+            'description' => __('Select a specific Evaluation Board to link to this product.', 'silvertell-wc-customisation')
+        ]);
+
+        echo '</div>';
+    }
+
     public function render_custom_product_data_panels()
     {
         global $post;
@@ -221,11 +275,8 @@ class Silvertell_Woocommerce_Customisation
 
         // Tab 2: Documents (Unified)
         echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
-
-        // The primary field, visible at all times
         $this->render_single_file_upload_field('_manual', __('Manual', 'silvertell-wc-customisation'), 'Upload the primary product or evaluation board manual.');
 
-        // The Repeater Group (dynamically hidden via JS if Eval Board)
         echo '<div class="options_group dd-additional-documents-wrapper"><div class="dd-repeater-header-title"><strong>' . __('Documents', 'silvertell-wc-customisation') . '</strong></div>';
         echo '<div class="dd-repeater-container" data-type="documents">';
         $documents = get_post_meta($post->ID, '_documents', true);
@@ -365,7 +416,12 @@ class Silvertell_Woocommerce_Customisation
             update_post_meta($post_id, '_manual', sanitize_text_field(wp_unslash($_POST['_manual'])));
         }
 
-        // 3. Save Documents Array
+        // 3. Save Linked Eval Board ID
+        if (isset($_POST['_linked_eval_board'])) {
+            update_post_meta($post_id, '_linked_eval_board', absint($_POST['_linked_eval_board']));
+        }
+
+        // 4. Save Documents Array
         $doc_names = isset($_POST['dd_doc_names']) && is_array($_POST['dd_doc_names']) ? wp_unslash($_POST['dd_doc_names']) : [];
         $doc_files = isset($_POST['dd_doc_files']) && is_array($_POST['dd_doc_files']) ? wp_unslash($_POST['dd_doc_files']) : [];
 
@@ -384,7 +440,7 @@ class Silvertell_Woocommerce_Customisation
         $this->clear_dynamic_meta_keys($post_id, '_document_name_');
         $this->clear_dynamic_meta_keys($post_id, '_document_file_');
 
-        // 4. Save Features Array
+        // 5. Save Features Array
         $features_data = isset($_POST['dd_feature_texts']) && is_array($_POST['dd_feature_texts']) ? wp_unslash($_POST['dd_feature_texts']) : [];
         $features_data = array_values($features_data);
         $final_features = [];
@@ -682,16 +738,12 @@ class Silvertell_Woocommerce_Customisation
                         });
 
                         if (isEval) {
-                            // Hide the Features Tab completely and hide the repeater block inside Documents
                             $('.dd-tab-feats').hide();
                             $('.dd-additional-documents-wrapper').hide();
-
-                            // Safety fallback: if Features tab is currently active, switch to Documents
                             if ($('.dd-tab-feats').hasClass('active')) {
                                 $('.dd-tab-docs a').trigger('click');
                             }
                         } else {
-                            // Restore everything for non-eval products
                             $('.dd-tab-feats').show();
                             $('.dd-additional-documents-wrapper').show();
                         }

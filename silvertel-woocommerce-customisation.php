@@ -141,7 +141,7 @@ class Silvertell_Woocommerce_Customisation {
 
 		// Tab 1: Buy Samples
 		echo '<div id="silvertell_buy_samples_data" class="panel woocommerce_options_panel">';
-		woocommerce_wp_text_input( [ 'id' => '_farnel_url', 'label' => __( 'Farnell URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
+		woocommerce_wp_text_input( [ 'id' => '_farnell_url', 'label' => __( 'farnelll URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
 		woocommerce_wp_text_input( [ 'id' => '_mouser_url', 'label' => __( 'Mouser URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
 		woocommerce_wp_text_input( [ 'id' => '_digikey_url', 'label' => __( 'Digikey URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
 		echo '</div>';
@@ -314,7 +314,7 @@ class Silvertell_Woocommerce_Customisation {
 		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
 
 		// 1. Save Basic URL Fields
-		$url_fields = [ '_farnel_url', '_mouser_url', '_digikey_url' ];
+		$url_fields = [ '_farnell_url', '_mouser_url', '_digikey_url' ];
 		foreach ( $url_fields as $field ) {
 			if ( isset( $_POST[ $field ] ) ) {
 				update_post_meta( $post_id, $field, sanitize_url( wp_unslash( $_POST[ $field ] ) ) );

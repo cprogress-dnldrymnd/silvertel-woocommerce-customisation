@@ -267,46 +267,68 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Saves the custom product data meta fields and rebuilds the numeric discrete keys.
-     * * @param int $post_id The ID of the product being saved.
+     * Saves the custom product data meta fields safely.
+     * Rebuilds the numeric discrete keys required for the CSV importer.
+     *
+     * @param int $post_id The ID of the product being saved.
      * @return void
      */
     public function save_custom_product_data($post_id)
     {
-        // Save simple URL fields
+        // Prevent running during autosaves
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+
+        // 1. Save Simple URL Fields
         $url_fields = ['_farnel_url', '_mouser_url', '_digikey_url'];
         foreach ($url_fields as $field) {
             if (isset($_POST[$field])) {
-                update_post_meta($post_id, $field, sanitize_url($_POST[$field]));
+                update_post_meta($post_id, $field, sanitize_url(wp_unslash($_POST[$field])));
             }
         }
 
-        // Save Documents Data
+        // 2. Save Documents Data (Bulletproof Array Handling)
         $this->clear_dynamic_meta_keys($post_id, '_document_name_');
         $this->clear_dynamic_meta_keys($post_id, '_document_file_');
-        if (! empty($_POST['dd_doc_names'])) {
-            $doc_names = array_values($_POST['dd_doc_names']);
-            $doc_files = array_values($_POST['dd_doc_files']);
-            $index = 1;
-            for ($i = 0; $i < count($doc_names); $i++) {
-                if (! empty($doc_names[$i]) || ! empty($doc_files[$i])) {
-                    update_post_meta($post_id, '_document_name_' . $index, sanitize_text_field($doc_names[$i]));
-                    update_post_meta($post_id, '_document_file_' . $index, sanitize_text_field($doc_files[$i]));
-                    $index++;
-                }
+
+        // Safely grab POST data, default to empty arrays if missing
+        $doc_names = isset($_POST['dd_doc_names']) && is_array($_POST['dd_doc_names']) ? wp_unslash($_POST['dd_doc_names']) : [];
+        $doc_files = isset($_POST['dd_doc_files']) && is_array($_POST['dd_doc_files']) ? wp_unslash($_POST['dd_doc_files']) : [];
+
+        // Re-index arrays to ensure they align (0, 1, 2, 3...)
+        $doc_names = array_values($doc_names);
+        $doc_files = array_values($doc_files);
+
+        // Find the longest array to ensure no data is dropped
+        $max_docs = max(count($doc_names), count($doc_files));
+        $index = 1;
+
+        for ($i = 0; $i < $max_docs; $i++) {
+            // Safely extract the string, default to empty if not present
+            $name = isset($doc_names[$i]) ? sanitize_text_field($doc_names[$i]) : '';
+            $file = isset($doc_files[$i]) ? sanitize_text_field($doc_files[$i]) : '';
+
+            // Only save if the row isn't entirely blank
+            if ($name !== '' || $file !== '') {
+                update_post_meta($post_id, '_document_name_' . $index, $name);
+                update_post_meta($post_id, '_document_file_' . $index, $file);
+                $index++;
             }
         }
 
-        // Save Features Data
+        // 3. Save Features Data
         $this->clear_dynamic_meta_keys($post_id, '_featured_');
-        if (! empty($_POST['dd_feature_texts'])) {
-            $features = array_values($_POST['dd_feature_texts']);
-            $index = 1;
-            foreach ($features as $feature) {
-                if (! empty(trim($feature))) {
-                    update_post_meta($post_id, '_featured_' . $index, sanitize_textarea_field($feature));
-                    $index++;
-                }
+
+        $features = isset($_POST['dd_feature_texts']) && is_array($_POST['dd_feature_texts']) ? wp_unslash($_POST['dd_feature_texts']) : [];
+        $features = array_values($features);
+
+        $index = 1;
+        foreach ($features as $feature) {
+            // Only save if the textarea actually has content
+            if (trim($feature) !== '') {
+                update_post_meta($post_id, '_featured_' . $index, sanitize_textarea_field($feature));
+                $index++;
             }
         }
     }

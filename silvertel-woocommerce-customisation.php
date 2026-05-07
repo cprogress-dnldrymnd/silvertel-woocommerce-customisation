@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, conditional UI sections, dynamic sample providers, and custom linked products.
- * Version: 2.11.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, conditional UI sections, dynamic sample providers, and SKU-to-ID translations.
+ * Version: 2.12.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -250,12 +250,11 @@ class Silvertell_Woocommerce_Customisation {
 		}
 		echo '</div>';
 
-		// Tab 2: Documents (Unified)
+		// Tab 2: Documents
 		echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
 		
-		// Wrap manual field so JS can toggle it independently
 		echo '<div class="dd-manual-field-wrapper">';
-		$this->render_single_file_upload_field( '_manual', __( 'Manual', 'silvertell-wc-customisation' ), 'Upload the evaluation board manual.' );
+		$this->render_single_file_upload_field( '_manual', __( 'Manual', 'silvertell-wc-customisation' ), 'Upload the primary product or evaluation board manual.' );
 		echo '</div>';
 		
 		echo '<div class="options_group dd-additional-documents-wrapper"><div class="dd-repeater-header-title"><strong>' . __( 'Documents', 'silvertell-wc-customisation' ) . '</strong></div>';
@@ -449,6 +448,30 @@ class Silvertell_Woocommerce_Customisation {
 			$meta_key   = $meta_obj->key;
 			$meta_value = $meta_obj->value;
 
+			// Convert _linked_eval_board SKU to Product ID
+			if ( $meta_key === '_linked_eval_board' ) {
+				$val = trim( $meta_value );
+				if ( ! empty( $val ) ) {
+					// Check if input is already a valid product ID
+					$board_product = wc_get_product( $val );
+					if ( $board_product ) {
+						$product->update_meta_data( '_linked_eval_board', $board_product->get_id() );
+					} else {
+						// Look it up by SKU
+						$board_id = wc_get_product_id_by_sku( $val );
+						if ( $board_id ) {
+							$product->update_meta_data( '_linked_eval_board', $board_id );
+						} else {
+							// Invalid SKU or ID
+							$product->delete_meta_data( '_linked_eval_board' );
+						}
+					}
+				} else {
+					$product->delete_meta_data( '_linked_eval_board' );
+				}
+				continue;
+			}
+
 			if ( preg_match( '/^_document_file_(\d+)$/', $meta_key, $matches ) ) {
 				$has_doc_updates = true;
 				$index = $matches[1];
@@ -598,19 +621,14 @@ class Silvertell_Woocommerce_Customisation {
 					});
 
 					if (isEval) {
-						// Is Eval: Hide Features, Hide Additional Docs, Show Manual
 						$('.dd-tab-feats').hide();
 						$('.dd-additional-documents-wrapper').hide();
-						$('.dd-manual-field-wrapper').show();
-						
 						if ($('.dd-tab-feats').hasClass('active')) {
 							$('.dd-tab-docs a').trigger('click');
 						}
 					} else {
-						// Not Eval: Show Features, Show Additional Docs, Hide Manual
 						$('.dd-tab-feats').show();
 						$('.dd-additional-documents-wrapper').show();
-						$('.dd-manual-field-wrapper').hide();
 					}
 				}
 

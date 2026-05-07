@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading during CSV imports, custom product tabs, and beautiful, functional native repeater fields.
- * Version: 2.1.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading during CSV imports, custom product tabs, and beautiful, functional native repeater fields with Media Library integration.
+ * Version: 2.2.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -21,11 +21,19 @@ if (! defined('ABSPATH')) {
 class Silvertell_Woocommerce_Customisation
 {
 
+    /**
+     * Constructor.
+     * * Initializes the class and registers all necessary WordPress and WooCommerce hooks.
+     */
     public function __construct()
     {
         $this->register_hooks();
     }
 
+    /**
+     * Registers all action and filter hooks for the customisations.
+     * * @return void
+     */
     private function register_hooks()
     {
         // CSV Import Interception
@@ -40,21 +48,28 @@ class Silvertell_Woocommerce_Customisation
         add_action('woocommerce_product_data_panels', [$this, 'render_custom_product_data_panels']);
         add_action('woocommerce_process_product_meta', [$this, 'save_custom_product_data']);
 
-        // Enqueue scripts and styles for the repeater fields reliably in the footer
+        // Enqueue scripts and styles for the repeater fields reliably
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_core_assets']);
     }
 
     /**
-     * Ensures core WordPress UI scripts are loaded.
+     * Ensures core WordPress UI and Media scripts are loaded on the product edit screen.
+     * * @param string $hook The current admin page hook.
+     * @return void
      */
     public function enqueue_core_assets($hook)
     {
         if (in_array($hook, ['post.php', 'post-new.php'], true)) {
             wp_enqueue_script('jquery-ui-sortable');
+            wp_enqueue_media(); // Enqueue WordPress Media Library frame for the file picker
         }
     }
 
+    /**
+     * Adds a custom submenu page under the main WooCommerce admin menu.
+     * * @return void
+     */
     public function add_settings_page()
     {
         add_submenu_page(
@@ -67,11 +82,19 @@ class Silvertell_Woocommerce_Customisation
         );
     }
 
+    /**
+     * Registers the plugin settings using the WordPress Settings API.
+     * * @return void
+     */
     public function register_settings()
     {
         register_setting('silvertell_file_importer_group', 'silvertell_file_meta_keys');
     }
 
+    /**
+     * Renders the HTML frontend for the custom settings page in the WordPress admin.
+     * * @return void
+     */
     public function render_settings_page()
     {
         if (! current_user_can('manage_woocommerce')) return;
@@ -99,6 +122,11 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    /**
+     * Adds custom tabs to the WooCommerce Product Data meta box.
+     * * @param array $tabs Existing WooCommerce product data tabs.
+     * @return array Modified array of tabs.
+     */
     public function add_custom_product_data_tabs($tabs)
     {
         $tabs['buy_samples'] = ['label' => __('Buy Samples', 'silvertell-wc-customisation'), 'target' => 'silvertell_buy_samples_data', 'class' => ['show_if_simple', 'show_if_variable'], 'priority' => 80];
@@ -107,6 +135,10 @@ class Silvertell_Woocommerce_Customisation
         return $tabs;
     }
 
+    /**
+     * Renders the HTML panels for the custom product data tabs.
+     * * @return void
+     */
     public function render_custom_product_data_panels()
     {
         global $post;
@@ -161,7 +193,11 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Renders a single row for the Documents repeater.
-     * Includes a template flag to create the hidden blueprint row.
+     * Now features a WP Media Library upload button integration.
+     * * @param string  $name         The document name.
+     * @param string  $display_file Formatted display URL for existing files.
+     * @param string  $raw_file     The raw database value (URL or ID).
+     * @param boolean $is_template  If true, configures the row as a hidden JS clone template.
      */
     private function render_document_row($name = '', $display_file = '', $raw_file = '', $is_template = false)
     {
@@ -186,8 +222,11 @@ class Silvertell_Woocommerce_Customisation
                     <input type="text" name="dd_doc_names[]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr($name); ?>" <?php echo $input_attr; ?> />
                 </div>
                 <div class="dd-field-group">
-                    <label>Document File URL/ID</label>
-                    <input type="text" name="dd_doc_files[]" class="dd-full-width" value="<?php echo esc_attr($raw_file); ?>" <?php echo $input_attr; ?> />
+                    <label>Document File</label>
+                    <div class="dd-file-wrap">
+                        <input type="text" name="dd_doc_files[]" class="dd-file-input" placeholder="http://... or Attachment ID" value="<?php echo esc_attr($raw_file); ?>" <?php echo $input_attr; ?> />
+                        <button type="button" class="button dd-upload-file">Select File</button>
+                    </div>
                     <?php if ($display_file && $display_file !== $raw_file && !$is_template) echo '<span class="description" style="display:block; margin-top:5px;">Current File: <a href="' . esc_url($display_file) . '" target="_blank">View File</a></span>'; ?>
                 </div>
             </div>
@@ -197,6 +236,8 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Renders a single row for the Features repeater.
+     * * @param string  $feature     The feature text string.
+     * @param boolean $is_template If true, configures the row as a hidden JS clone template.
      */
     private function render_feature_row($feature = '', $is_template = false)
     {
@@ -225,6 +266,11 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    /**
+     * Saves the custom product data meta fields and rebuilds the numeric discrete keys.
+     * * @param int $post_id The ID of the product being saved.
+     * @return void
+     */
     public function save_custom_product_data($post_id)
     {
         // Save simple URL fields
@@ -265,12 +311,24 @@ class Silvertell_Woocommerce_Customisation
         }
     }
 
+    /**
+     * Deletes all sequential meta keys starting with a specific prefix.
+     * * @param int    $post_id The post ID.
+     * @param string $prefix  The meta key prefix (e.g., '_featured_').
+     * @return void
+     */
     private function clear_dynamic_meta_keys($post_id, $prefix)
     {
         global $wpdb;
         $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s", $post_id, $wpdb->esc_like($prefix) . '%'));
     }
 
+    /**
+     * Intercepts the product object before it is saved during a CSV import to handle dynamic URLs.
+     * * @param WC_Product $product The WooCommerce product object.
+     * @param array      $data    The raw associative array of CSV data.
+     * @return WC_Product
+     */
     public function intercept_meta_for_sideload($product, $data)
     {
         $meta_keys_string = get_option('silvertell_file_meta_keys', '_manual');
@@ -306,6 +364,12 @@ class Silvertell_Woocommerce_Customisation
         return $product;
     }
 
+    /**
+     * Handles the secure downloading and insertion of a remote file into the WP Media Library.
+     * * @param string $url       The remote URL of the file.
+     * @param int    $parent_id The parent post ID.
+     * @return int|WP_Error
+     */
     public function sideload_file_to_media_library($url, $parent_id = 0)
     {
         if (! function_exists('media_handle_sideload')) {
@@ -329,6 +393,8 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Injects the custom CSS and JS specifically formatted to override WooCommerce's default float styles.
+     * Also includes the JS logic for the WP Media Library frame.
+     * * @return void
      */
     public function inject_repeater_assets()
     {
@@ -336,7 +402,7 @@ class Silvertell_Woocommerce_Customisation
         if (! $screen || $screen->post_type !== 'product') return;
     ?>
         <style>
-            /* UI Reset & Polish for WooCommerce Panel */
+            /* UI Reset & Polish: Overriding aggressive WooCommerce floats */
             .dd-panel-wrapper {
                 padding: 10px 20px 20px !important;
             }
@@ -407,31 +473,59 @@ class Silvertell_Woocommerce_Customisation
                 color: #d63638;
             }
 
-            /* Content Area */
+            /* Content Area & Form Overrides */
             .dd-repeater-content {
                 padding: 15px 20px;
                 display: none;
+                background: #fcfcfc;
             }
 
             .dd-field-group {
                 margin-bottom: 15px;
+                display: block;
+                clear: both;
             }
 
             .dd-field-group:last-child {
                 margin-bottom: 0;
             }
 
+            /* Crucial Reset: Prevents labels and inputs from floating side-by-side */
             .dd-field-group label {
-                display: block;
+                display: block !important;
+                float: none !important;
+                width: auto !important;
                 font-weight: 600;
                 margin-bottom: 6px;
                 color: #50575e;
             }
 
-            .dd-full-width {
+            .dd-field-group input[type="text"],
+            .dd-field-group textarea {
+                display: block;
                 width: 100% !important;
-                max-width: 100% !important;
+                border: 1px solid #8c8f94;
+                padding: 6px 8px;
+                border-radius: 3px;
+                background: #fff;
                 box-sizing: border-box;
+            }
+
+            /* File Selection Flex Layout */
+            .dd-file-wrap {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                width: 100%;
+            }
+
+            .dd-file-wrap input.dd-file-input {
+                flex-grow: 1;
+                margin: 0;
+            }
+
+            .dd-file-wrap button {
+                white-space: nowrap;
             }
 
             /* Footer/Add Button */
@@ -509,6 +603,38 @@ class Silvertell_Woocommerce_Customisation
                 $('.dd-repeater-row:not(.dd-template)').each(function() {
                     $(this).find('.dd-repeater-content').show();
                     $(this).find('.dd-collapse-row').removeClass('dashicons-arrow-down-alt2').addClass('dashicons-arrow-up-alt2');
+                });
+
+                // WP Media Library Integration for File Uploader
+                var mediaUploader;
+                $(document).on('click.ddRepeater', '.dd-upload-file', function(e) {
+                    e.preventDefault();
+                    var button = $(this);
+                    var inputField = button.siblings('.dd-file-input');
+
+                    // If the uploader object has already been created, reopen the dialog
+                    if (mediaUploader) {
+                        mediaUploader.open();
+                        return;
+                    }
+
+                    // Extend the wp.media object
+                    mediaUploader = wp.media.frames.file_frame = wp.media({
+                        title: 'Select or Upload Document',
+                        button: {
+                            text: 'Use this file'
+                        },
+                        multiple: false // Set to true to allow multiple files to be selected
+                    });
+
+                    // When a file is selected, grab the URL and set it as the text field's value
+                    mediaUploader.on('select', function() {
+                        var attachment = mediaUploader.state().get('selection').first().toJSON();
+                        inputField.val(attachment.url).trigger('input');
+                    });
+
+                    // Open the uploader dialog
+                    mediaUploader.open();
                 });
             });
         </script>

@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, and native repeater fields with Media Library integration.
- * Version: 2.3.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage for documents and features, and native repeater fields with Media Library integration.
+ * Version: 2.4.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -13,14 +13,28 @@ if (! defined('ABSPATH')) {
     exit; // Exit if accessed directly.
 }
 
+/**
+ * Class Silvertell_Woocommerce_Customisation
+ * Encapsulates custom WooCommerce modifications, including dynamic file sideloading during CSV imports,
+ * administrative settings interfaces, and bespoke product data tabs with advanced repeater functionalities.
+ */
 class Silvertell_Woocommerce_Customisation
 {
 
+    /**
+     * Constructor.
+     * Initializes the class and registers all necessary WordPress and WooCommerce hooks.
+     */
     public function __construct()
     {
         $this->register_hooks();
     }
 
+    /**
+     * Registers all action and filter hooks for the customisations.
+     *
+     * @return void
+     */
     private function register_hooks()
     {
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
@@ -33,6 +47,12 @@ class Silvertell_Woocommerce_Customisation
         add_action('admin_enqueue_scripts', [$this, 'enqueue_core_assets']);
     }
 
+    /**
+     * Ensures core WordPress UI and Media scripts are loaded on the product edit screen.
+     *
+     * @param string $hook The current admin page hook.
+     * @return void
+     */
     public function enqueue_core_assets($hook)
     {
         if (in_array($hook, ['post.php', 'post-new.php'], true)) {
@@ -41,16 +61,31 @@ class Silvertell_Woocommerce_Customisation
         }
     }
 
+    /**
+     * Adds a custom submenu page under the main WooCommerce admin menu.
+     *
+     * @return void
+     */
     public function add_settings_page()
     {
         add_submenu_page('woocommerce', 'File Import Settings', 'File Import Settings', 'manage_woocommerce', 'silvertell-file-importer', [$this, 'render_settings_page']);
     }
 
+    /**
+     * Registers the plugin settings using the WordPress Settings API.
+     *
+     * @return void
+     */
     public function register_settings()
     {
         register_setting('silvertell_file_importer_group', 'silvertell_file_meta_keys');
     }
 
+    /**
+     * Renders the HTML frontend for the custom settings page in the WordPress admin.
+     *
+     * @return void
+     */
     public function render_settings_page()
     {
         if (! current_user_can('manage_woocommerce')) return;
@@ -58,7 +93,7 @@ class Silvertell_Woocommerce_Customisation
 ?>
         <div class="wrap">
             <h1>WooCommerce File Importer Settings</h1>
-            <p>Specify which meta keys the importer should scan for file URLs. Note: <code>_document_file_X</code> and <code>_gallery_image_X</code> are handled automatically.</p>
+            <p>Specify which meta keys the importer should scan for file URLs. Note: <code>_document_file_X</code>, <code>_feature_X</code>, and <code>_gallery_image_X</code> are handled automatically.</p>
             <form method="post" action="options.php">
                 <?php settings_fields('silvertell_file_importer_group'); ?>
                 <table class="form-table" role="presentation">
@@ -77,6 +112,12 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    /**
+     * Adds custom tabs to the WooCommerce Product Data meta box.
+     *
+     * @param array $tabs Existing WooCommerce product data tabs.
+     * @return array Modified array of tabs.
+     */
     public function add_custom_product_data_tabs($tabs)
     {
         $tabs['buy_samples'] = ['label' => __('Buy Samples', 'silvertell-wc-customisation'), 'target' => 'silvertell_buy_samples_data', 'class' => ['show_if_simple', 'show_if_variable'], 'priority' => 80];
@@ -85,6 +126,11 @@ class Silvertell_Woocommerce_Customisation
         return $tabs;
     }
 
+    /**
+     * Renders the HTML panels for the custom product data tabs.
+     *
+     * @return void
+     */
     public function render_custom_product_data_panels()
     {
         global $post;
@@ -130,32 +176,48 @@ class Silvertell_Woocommerce_Customisation
         echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __('Add Document', 'silvertell-wc-customisation') . '</button></div>';
         echo '</div></div>';
 
-        // Tab 3: Features
+        // Tab 3: Features (Repeater utilizing Single Meta Key Array)
         echo '<div id="silvertell_features_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
         echo '<div class="options_group"><div class="dd-repeater-header-title"><strong>' . __('Product Features', 'silvertell-wc-customisation') . '</strong></div>';
         echo '<div class="dd-repeater-container" data-type="features">';
 
-        $j = 1;
-        while (get_post_meta($post->ID, '_featured_' . $j, true)) {
-            $this->render_feature_row(get_post_meta($post->ID, '_featured_' . $j, true), false);
-            $j++;
+        $features = get_post_meta($post->ID, '_features', true);
+
+        // Legacy fallback if migrating from old numbered keys
+        if (empty($features) || ! is_array($features)) {
+            $features = [];
+            $j = 1;
+            while (get_post_meta($post->ID, '_featured_' . $j, true)) {
+                $features[] = get_post_meta($post->ID, '_featured_' . $j, true);
+                $j++;
+            }
         }
 
-        $this->render_feature_row('', true);
+        if (! empty($features)) {
+            foreach ($features as $feature_val) {
+                $this->render_feature_row($feature_val, false);
+            }
+        }
+
+        $this->render_feature_row('', true); // Hidden template
         echo '</div>';
         echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __('Add Feature', 'silvertell-wc-customisation') . '</button></div>';
         echo '</div></div>';
     }
 
     /**
-     * Renders the Document Row. Text input removed, replaced with hidden ID storage and visual filename.
+     * Renders the Document Row. Features hidden ID storage and visual filename.
+     *
+     * @param string  $name         The document name.
+     * @param string  $display_file Formatted display URL for existing files.
+     * @param string  $raw_file     The raw database value (URL or ID).
+     * @param boolean $is_template  If true, configures the row as a hidden JS clone template.
      */
     private function render_document_row($name = '', $display_file = '', $raw_file = '', $is_template = false)
     {
         $row_class = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
         $input_attr = $is_template ? 'disabled="disabled"' : '';
 
-        // Clean up the filename for display
         $filename_display = 'No file selected';
         if ($display_file) {
             $filename_display = basename(wp_parse_url($display_file, PHP_URL_PATH));
@@ -192,6 +254,12 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    /**
+     * Renders a single row for the Features repeater.
+     *
+     * @param string  $feature     The feature text string.
+     * @param boolean $is_template If true, configures the row as a hidden JS clone template.
+     */
     private function render_feature_row($feature = '', $is_template = false)
     {
         $row_class = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
@@ -219,6 +287,12 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    /**
+     * Saves the custom product data meta fields and builds the core array structures.
+     *
+     * @param int $post_id The ID of the product being saved.
+     * @return void
+     */
     public function save_custom_product_data($post_id)
     {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
@@ -249,25 +323,33 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
-        // Save the single array and cleanup legacy fields just in case
         update_post_meta($post_id, '_documents', $final_docs);
         $this->clear_dynamic_meta_keys($post_id, '_document_name_');
         $this->clear_dynamic_meta_keys($post_id, '_document_file_');
 
-        // 3. Save Features Data
-        $this->clear_dynamic_meta_keys($post_id, '_featured_');
-        $features = isset($_POST['dd_feature_texts']) && is_array($_POST['dd_feature_texts']) ? wp_unslash($_POST['dd_feature_texts']) : [];
-        $features = array_values($features);
+        // 3. Save Features Array
+        $features_data = isset($_POST['dd_feature_texts']) && is_array($_POST['dd_feature_texts']) ? wp_unslash($_POST['dd_feature_texts']) : [];
+        $features_data = array_values($features_data);
+        $final_features = [];
 
-        $index = 1;
-        foreach ($features as $feature) {
+        foreach ($features_data as $feature) {
             if (trim($feature) !== '') {
-                update_post_meta($post_id, '_featured_' . $index, sanitize_textarea_field($feature));
-                $index++;
+                $final_features[] = sanitize_textarea_field($feature);
             }
         }
+
+        update_post_meta($post_id, '_features', $final_features);
+        $this->clear_dynamic_meta_keys($post_id, '_feature_');
+        $this->clear_dynamic_meta_keys($post_id, '_featured_');
     }
 
+    /**
+     * Deletes all sequential meta keys starting with a specific prefix.
+     *
+     * @param int    $post_id The post ID.
+     * @param string $prefix  The meta key prefix.
+     * @return void
+     */
     private function clear_dynamic_meta_keys($post_id, $prefix)
     {
         global $wpdb;
@@ -275,7 +357,11 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Interceptor: Translates numbered CSV columns into the single _documents array.
+     * Interceptor: Translates numbered CSV columns into the _documents and _features arrays.
+     *
+     * @param WC_Product $product The WooCommerce product object.
+     * @param array      $data    The raw associative array of CSV data.
+     * @return WC_Product
      */
     public function intercept_meta_for_sideload($product, $data)
     {
@@ -286,6 +372,9 @@ class Silvertell_Woocommerce_Customisation
         $gallery_image_ids = [];
         $incoming_docs = [];
         $has_doc_updates = false;
+
+        $incoming_features = [];
+        $has_feature_updates = false;
 
         foreach ($all_meta as $meta_obj) {
             $meta_key   = $meta_obj->key;
@@ -305,7 +394,7 @@ class Silvertell_Woocommerce_Customisation
                     $incoming_docs[$index]['file'] = $meta_value;
                 }
 
-                $product->delete_meta_data($meta_key); // Remove messy numbered key
+                $product->delete_meta_data($meta_key);
                 continue;
             }
 
@@ -314,7 +403,16 @@ class Silvertell_Woocommerce_Customisation
                 $has_doc_updates = true;
                 $index = $matches[1];
                 $incoming_docs[$index]['name'] = $meta_value;
-                $product->delete_meta_data($meta_key); // Remove messy numbered key
+                $product->delete_meta_data($meta_key);
+                continue;
+            }
+
+            // Handle Features (_feature_1 or _featured_1)
+            if (preg_match('/^_(?:feature|featured)_(\d+)$/', $meta_key, $matches)) {
+                $has_feature_updates = true;
+                $index = $matches[1];
+                $incoming_features[$index] = $meta_value;
+                $product->delete_meta_data($meta_key);
                 continue;
             }
 
@@ -333,9 +431,9 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
-        // Rebuild the _documents array and save it
+        // Rebuild the _documents array
         if ($has_doc_updates) {
-            ksort($incoming_docs); // Ensure proper order
+            ksort($incoming_docs); // Ensure proper order mapping
             $final_docs = [];
             foreach ($incoming_docs as $doc) {
                 if (! empty($doc['name']) || ! empty($doc['file'])) {
@@ -348,6 +446,18 @@ class Silvertell_Woocommerce_Customisation
             $product->update_meta_data('_documents', $final_docs);
         }
 
+        // Rebuild the _features array
+        if ($has_feature_updates) {
+            ksort($incoming_features); // Ensure proper order mapping
+            $final_features = [];
+            foreach ($incoming_features as $feature) {
+                if (trim($feature) !== '') {
+                    $final_features[] = $feature;
+                }
+            }
+            $product->update_meta_data('_features', $final_features);
+        }
+
         // Update Native Gallery
         if (! empty($gallery_image_ids)) {
             $existing_gallery = $product->get_gallery_image_ids();
@@ -358,6 +468,13 @@ class Silvertell_Woocommerce_Customisation
         return $product;
     }
 
+    /**
+     * Handles the secure downloading and insertion of a remote file into the WP Media Library.
+     *
+     * @param string $url       The remote URL of the file.
+     * @param int    $parent_id The parent post ID.
+     * @return int|WP_Error
+     */
     public function sideload_file_to_media_library($url, $parent_id = 0)
     {
         if (! function_exists('media_handle_sideload')) {
@@ -379,6 +496,12 @@ class Silvertell_Woocommerce_Customisation
         return $attachment_id;
     }
 
+    /**
+     * Injects the custom CSS and JS specifically formatted to override WooCommerce's default float styles.
+     * Also includes the JS logic for the WP Media Library frame with explicit scoping.
+     *
+     * @return void
+     */
     public function inject_repeater_assets()
     {
         $screen = get_current_screen();
@@ -554,7 +677,6 @@ class Silvertell_Woocommerce_Customisation
                     template.removeClass('dd-template');
                     template.find('input, textarea').removeAttr('disabled');
 
-                    // Reset visually hidden UI components for the new row
                     template.find('.dd-file-display').text('No file selected');
                     template.find('.description').remove();
 
@@ -583,17 +705,14 @@ class Silvertell_Woocommerce_Customisation
                 $(document).on('click.ddRepeater', '.dd-upload-file', function(e) {
                     e.preventDefault();
 
-                    // Update the global target references to the CURRENT button's siblings
                     currentTargetInput = $(this).siblings('.dd-file-input');
                     currentTargetDisplay = $(this).siblings('.dd-file-display');
 
-                    // If uploader exists, just open it (it will use the updated targets above)
                     if (mediaUploader) {
                         mediaUploader.open();
                         return;
                     }
 
-                    // Otherwise, instantiate it
                     mediaUploader = wp.media.frames.file_frame = wp.media({
                         title: 'Select or Upload Document',
                         button: {
@@ -602,7 +721,6 @@ class Silvertell_Woocommerce_Customisation
                         multiple: false
                     });
 
-                    // Bind the select event using the dynamic global variables
                     mediaUploader.on('select', function() {
                         var attachment = mediaUploader.state().get('selection').first().toJSON();
 

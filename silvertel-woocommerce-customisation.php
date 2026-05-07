@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, and conditional category-based tabs.
- * Version: 2.6.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, array-based meta storage, native repeater fields, conditional tabs, and dynamic sample provider settings.
+ * Version: 2.7.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -44,13 +44,14 @@ class Silvertell_Woocommerce_Customisation {
 	}
 
 	/**
-	 * Ensures core WordPress UI and Media scripts are loaded on the product edit screen.
+	 * Ensures core WordPress UI and Media scripts are loaded on required screens.
 	 *
 	 * @param string $hook The current admin page hook.
 	 * @return void
 	 */
 	public function enqueue_core_assets( $hook ) {
-		if ( in_array( $hook, [ 'post.php', 'post-new.php' ], true ) ) {
+		// Load on product screens and our custom settings page
+		if ( in_array( $hook, [ 'post.php', 'post-new.php', 'woocommerce_page_silvertell-file-importer' ], true ) ) {
 			wp_enqueue_script( 'jquery-ui-sortable' );
 			wp_enqueue_media();
 		}
@@ -62,21 +63,69 @@ class Silvertell_Woocommerce_Customisation {
 	 * @return void
 	 */
 	public function add_settings_page() {
-		add_submenu_page( 'woocommerce', 'File Import Settings', 'File Import Settings', 'manage_woocommerce', 'silvertell-file-importer', [ $this, 'render_settings_page' ] );
+		add_submenu_page( 'woocommerce', 'File Import & Tab Settings', 'File Import Settings', 'manage_woocommerce', 'silvertell-file-importer', [ $this, 'render_settings_page' ] );
 	}
 
 	/**
 	 * Registers the plugin settings using the WordPress Settings API.
+	 * Includes a sanitization callback for the dynamic repeater fields.
 	 *
 	 * @return void
 	 */
 	public function register_settings() {
 		register_setting( 'silvertell_file_importer_group', 'silvertell_file_meta_keys' );
 		register_setting( 'silvertell_file_importer_group', 'silvertell_eval_category_slug' );
+		register_setting( 'silvertell_file_importer_group', 'silvertell_sample_providers', [ $this, 'sanitize_sample_providers' ] );
+	}
+
+	/**
+	 * Sanitizes the dynamic Sample Providers repeater array before saving to the database.
+	 *
+	 * @param array $input The raw POST array.
+	 * @return array The sanitized, structured array.
+	 */
+	public function sanitize_sample_providers( $input ) {
+		if ( ! is_array( $input ) || ! isset( $input['name'] ) ) return [];
+		
+		$providers = [];
+		$names = array_values( $input['name'] );
+		$keys  = array_values( $input['key'] );
+		$logos = array_values( $input['logo'] );
+		
+		$count = count( $names );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$name = sanitize_text_field( $names[$i] );
+			$key  = sanitize_text_field( $keys[$i] );
+			$logo = sanitize_text_field( $logos[$i] );
+			
+			if ( ! empty( $name ) && ! empty( $key ) ) {
+				// Ensure meta key starts with an underscore for hidden mapping
+				if ( substr( $key, 0, 1 ) !== '_' ) {
+					$key = '_' . $key;
+				}
+				$providers[] = [ 'name' => $name, 'meta_key' => $key, 'logo' => $logo ];
+			}
+		}
+		return $providers;
+	}
+
+	/**
+	 * Returns the dynamically configured sample providers, or default fallbacks.
+	 *
+	 * @return array
+	 */
+	private function get_sample_providers() {
+		$defaults = [
+			[ 'name' => 'Farnell', 'meta_key' => '_farnel_url', 'logo' => '' ],
+			[ 'name' => 'Mouser', 'meta_key' => '_mouser_url', 'logo' => '' ],
+			[ 'name' => 'Digikey', 'meta_key' => '_digikey_url', 'logo' => '' ],
+		];
+		return get_option( 'silvertell_sample_providers', $defaults );
 	}
 
 	/**
 	 * Renders the HTML frontend for the custom settings page in the WordPress admin.
+	 * Includes a backend repeater for dynamic Buy Samples providers.
 	 *
 	 * @return void
 	 */
@@ -84,50 +133,122 @@ class Silvertell_Woocommerce_Customisation {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) return;
 		$current_keys = get_option( 'silvertell_file_meta_keys', '_manual' );
 		$eval_slug    = get_option( 'silvertell_eval_category_slug', 'evaluation-boards' );
+		$providers    = $this->get_sample_providers();
 		?>
-		<div class="wrap">
-			<h1>WooCommerce File Importer & Tab Settings</h1>
-			<p>Configure the dynamic CSV importer and conditional product tabs below.</p>
+		<div class="wrap dd-panel-wrapper" style="padding:0 !important; max-width: 900px;">
+			<h1>WooCommerce Advanced Customisations</h1>
+			
 			<form method="post" action="options.php">
 				<?php settings_fields( 'silvertell_file_importer_group' ); ?>
+				
+				<h2 class="title">Importer & Category Logic</h2>
 				<table class="form-table" role="presentation">
 					<tbody>
 						<tr>
-							<th scope="row"><label for="silvertell_file_meta_keys">Target Meta Keys</label></th>
+							<th scope="row"><label for="silvertell_file_meta_keys">Target Sideload Meta Keys</label></th>
 							<td>
-								<input type="text" id="silvertell_file_meta_keys" name="silvertell_file_meta_keys" value="<?php echo esc_attr( $current_keys ); ?>" class="regular-text" style="width: 100%; max-width: 500px;">
+								<input type="text" id="silvertell_file_meta_keys" name="silvertell_file_meta_keys" value="<?php echo esc_attr( $current_keys ); ?>" class="regular-text" style="width: 100%;">
 							</td>
 						</tr>
 						<tr>
-							<th scope="row"><label for="silvertell_eval_category_slug">Evaluation Board Category Slug</label></th>
+							<th scope="row"><label for="silvertell_eval_category_slug">Eval Board Category Slug</label></th>
 							<td>
-								<input type="text" id="silvertell_eval_category_slug" name="silvertell_eval_category_slug" value="<?php echo esc_attr( $eval_slug ); ?>" class="regular-text" style="width: 100%; max-width: 500px;">
-								<p class="description">Enter the exact slug of the Evaluation Boards category. If checked, the custom Eval tab will show, and Docs/Features will hide.</p>
+								<input type="text" id="silvertell_eval_category_slug" name="silvertell_eval_category_slug" value="<?php echo esc_attr( $eval_slug ); ?>" class="regular-text" style="width: 100%;">
 							</td>
 						</tr>
 					</tbody>
 				</table>
-				<?php submit_button( 'Save Options' ); ?>
+
+				<hr style="margin: 30px 0;">
+
+				<h2 class="title">Buy Samples Providers</h2>
+				<p class="description" style="margin-bottom:15px;">Configure the dynamic providers for the "Buy Samples" product tab. Meta keys should be lowercase with underscores.</p>
+				
+				<div class="dd-repeater-container" data-type="providers">
+					<?php
+					if ( ! empty( $providers ) ) {
+						foreach ( $providers as $provider ) {
+							$this->render_settings_provider_row( $provider['name'], $provider['meta_key'], $provider['logo'] );
+						}
+					}
+					// Hidden Template
+					$this->render_settings_provider_row( '', '', '', true );
+					?>
+				</div>
+				<div class="dd-repeater-footer" style="margin-bottom: 30px;">
+					<button type="button" class="button button-secondary dd-add-row">Add Provider</button>
+				</div>
+
+				<?php submit_button( 'Save All Settings', 'primary', 'submit', true, ['style' => 'font-size:16px; padding: 5px 30px;'] ); ?>
 			</form>
 		</div>
 		<?php
 	}
 
 	/**
+	 * Renders a single row for the Settings Page Providers repeater.
+	 *
+	 * @param string  $name        Provider name.
+	 * @param string  $key         Provider meta key.
+	 * @param string  $logo        Provider logo ID/URL.
+	 * @param boolean $is_template If true, configures the row as a hidden template.
+	 * @return void
+	 */
+	private function render_settings_provider_row( $name = '', $key = '', $logo = '', $is_template = false ) {
+		$row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
+		$input_attr = $is_template ? 'disabled="disabled"' : '';
+		$logo_url   = is_numeric( $logo ) ? wp_get_attachment_image_url( $logo, 'thumbnail' ) : $logo;
+		$logo_disp  = $logo_url ? 'Logo Selected' : 'No Logo';
+		?>
+		<div class="<?php echo esc_attr( $row_class ); ?>">
+			<div class="dd-repeater-header">
+				<div class="dd-header-left">
+					<span class="dashicons dashicons-menu dd-drag-handle"></span>
+					<span class="dd-row-title"><?php echo $name ? esc_html($name) : 'New Provider'; ?></span>
+				</div>
+				<div class="dd-header-right dd-repeater-actions">
+					<span class="dashicons dashicons-arrow-down-alt2 dd-collapse-row" title="Toggle"></span>
+					<span class="dashicons dashicons-admin-page dd-duplicate-row" title="Duplicate"></span>
+					<span class="dashicons dashicons-trash dd-delete-row" title="Delete"></span>
+				</div>
+			</div>
+			<div class="dd-repeater-content">
+				<div style="display:flex; gap:20px;">
+					<div class="dd-field-group" style="flex:1;">
+						<label>Provider Name</label>
+						<input type="text" name="silvertell_sample_providers[name][]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr( $name ); ?>" <?php echo $input_attr; ?> placeholder="e.g. Farnell" />
+					</div>
+					<div class="dd-field-group" style="flex:1;">
+						<label>Meta Key</label>
+						<input type="text" name="silvertell_sample_providers[key][]" class="dd-full-width" value="<?php echo esc_attr( $key ); ?>" <?php echo $input_attr; ?> placeholder="e.g. _farnel_url" />
+					</div>
+				</div>
+				<div class="dd-field-group" style="margin-top:15px;">
+					<label>Provider Logo</label>
+					<div class="dd-file-wrap">
+						<input type="hidden" name="silvertell_sample_providers[logo][]" class="dd-file-input" value="<?php echo esc_attr( $logo ); ?>" <?php echo $input_attr; ?> />
+						<button type="button" class="button dd-upload-file">Select Image</button>
+						<span class="dd-file-display"><?php echo esc_html( $logo_disp ); ?></span>
+					</div>
+					<?php if ( $logo_url && !$is_template ) echo '<div style="margin-top:10px;"><img src="'.esc_url($logo_url).'" style="max-height:40px; border:1px solid #ddd; padding:3px; border-radius:4px;" /></div>'; ?>
+				</div>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
 	 * Adds custom tabs to the WooCommerce Product Data meta box.
-	 * Protects tab visibility against product type switching.
 	 *
 	 * @param array $tabs Existing WooCommerce product data tabs.
 	 * @return array Modified array of tabs.
 	 */
 	public function add_custom_product_data_tabs( $tabs ) {
 		$all_types = [ 'show_if_simple', 'show_if_variable', 'show_if_external', 'show_if_grouped' ];
-
 		$tabs['buy_samples'] = [ 'label' => __( 'Buy Samples', 'silvertell-wc-customisation' ), 'target' => 'silvertell_buy_samples_data', 'class' => $all_types, 'priority' => 80 ];
 		$tabs['documents']   = [ 'label' => __( 'Documents', 'silvertell-wc-customisation' ), 'target' => 'silvertell_documents_data', 'class' => array_merge( $all_types, [ 'dd-tab-docs' ] ), 'priority' => 81 ];
 		$tabs['features']    = [ 'label' => __( 'Features', 'silvertell-wc-customisation' ), 'target' => 'silvertell_features_data', 'class' => array_merge( $all_types, [ 'dd-tab-feats' ] ), 'priority' => 82 ];
 		$tabs['eval_board']  = [ 'label' => __( 'Eval Board Data', 'silvertell-wc-customisation' ), 'target' => 'silvertell_eval_board_data', 'class' => array_merge( $all_types, [ 'dd-tab-eval' ] ), 'priority' => 83 ];
-		
 		return $tabs;
 	}
 
@@ -139,21 +260,25 @@ class Silvertell_Woocommerce_Customisation {
 	public function render_custom_product_data_panels() {
 		global $post;
 
-		// Tab 1: Buy Samples
+		// Tab 1: Buy Samples (Now Dynamic)
 		echo '<div id="silvertell_buy_samples_data" class="panel woocommerce_options_panel">';
-		woocommerce_wp_text_input( [ 'id' => '_symmetry_url', 'label' => __( 'Symmetry URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
-		woocommerce_wp_text_input( [ 'id' => 'farnell', 'label' => __( 'Farnell URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
-		woocommerce_wp_text_input( [ 'id' => '_mouser_url', 'label' => __( 'Mouser URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
-		woocommerce_wp_text_input( [ 'id' => '_digikey_url', 'label' => __( 'Digikey URL', 'silvertell-wc-customisation' ), 'type' => 'url' ] );
+		$providers = $this->get_sample_providers();
+		if ( ! empty( $providers ) ) {
+			foreach ( $providers as $provider ) {
+				woocommerce_wp_text_input( [ 
+					'id'    => esc_attr( $provider['meta_key'] ), 
+					'label' => esc_html( $provider['name'] ), 
+					'type'  => 'url' 
+				] );
+			}
+		} else {
+			echo '<p style="padding:15px;">No sample providers configured. Add them in WooCommerce > File Import Settings.</p>';
+		}
 		echo '</div>';
 
 		// Tab 2: Documents
 		echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
-		
-		// Primary Manual Upload Field
 		$this->render_single_file_upload_field( '_manual', __( 'Primary Manual', 'silvertell-wc-customisation' ), 'Upload the main product manual.' );
-
-		// Repeater
 		echo '<div class="options_group"><div class="dd-repeater-header-title"><strong>' . __( 'Additional Documents', 'silvertell-wc-customisation' ) . '</strong></div>';
 		echo '<div class="dd-repeater-container" data-type="documents">';
 		$documents = get_post_meta( $post->ID, '_documents', true );
@@ -165,7 +290,7 @@ class Silvertell_Woocommerce_Customisation {
 				$this->render_document_row( $name_val, $display_file, $file_val, false );
 			}
 		}
-		$this->render_document_row( '', '', '', true ); // Hidden template
+		$this->render_document_row( '', '', '', true );
 		echo '</div>';
 		echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __( 'Add Document', 'silvertell-wc-customisation' ) . '</button></div>';
 		echo '</div></div>';
@@ -180,7 +305,7 @@ class Silvertell_Woocommerce_Customisation {
 				$this->render_feature_row( $feature_val, false );
 			}
 		}
-		$this->render_feature_row( '', true ); // Hidden template
+		$this->render_feature_row( '', true );
 		echo '</div>';
 		echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __( 'Add Feature', 'silvertell-wc-customisation' ) . '</button></div>';
 		echo '</div></div>';
@@ -205,8 +330,7 @@ class Silvertell_Woocommerce_Customisation {
 		$display_file = is_numeric( $raw_val ) ? wp_get_attachment_url( $raw_val ) : $raw_val;
 		$filename_display = $display_file ? basename( wp_parse_url( $display_file, PHP_URL_PATH ) ) : 'No file selected';
 		
-		echo '<div class="options_group">';
-		echo '<p class="form-field ' . esc_attr( $id ) . '_field">';
+		echo '<div class="options_group"><p class="form-field ' . esc_attr( $id ) . '_field">';
 		echo '<label for="' . esc_attr( $id ) . '">' . esc_html( $label ) . '</label>';
 		echo '<span class="dd-file-wrap" style="display:inline-flex; align-items:center; gap:10px; flex-grow:1;">';
 		echo '<input type="hidden" name="' . esc_attr( $id ) . '" id="' . esc_attr( $id ) . '" class="dd-file-input" value="' . esc_attr( $raw_val ) . '" />';
@@ -219,8 +343,7 @@ class Silvertell_Woocommerce_Customisation {
 			if ( $display_file ) echo '<a href="' . esc_url( $display_file ) . '" target="_blank">Preview Current File</a>';
 			echo '</span>';
 		}
-		echo '</p>';
-		echo '</div>';
+		echo '</p></div>';
 	}
 
 	/**
@@ -235,11 +358,7 @@ class Silvertell_Woocommerce_Customisation {
 	private function render_document_row( $name = '', $display_file = '', $raw_file = '', $is_template = false ) {
 		$row_class = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
 		$input_attr = $is_template ? 'disabled="disabled"' : '';
-		
-		$filename_display = 'No file selected';
-		if ( $display_file ) {
-			$filename_display = basename( wp_parse_url( $display_file, PHP_URL_PATH ) );
-		}
+		$filename_display = $display_file ? basename( wp_parse_url( $display_file, PHP_URL_PATH ) ) : 'No file selected';
 		?>
 		<div class="<?php echo esc_attr( $row_class ); ?>">
 			<div class="dd-repeater-header">
@@ -314,9 +433,10 @@ class Silvertell_Woocommerce_Customisation {
 	public function save_custom_product_data( $post_id ) {
 		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
 
-		// 1. Save Basic URL Fields
-		$url_fields = [ '_symmetry_url','_farnell_url', '_mouser_url', '_digikey_url' ];
-		foreach ( $url_fields as $field ) {
+		// 1. Save Dynamic Buy Samples URL Fields
+		$providers = $this->get_sample_providers();
+		foreach ( $providers as $provider ) {
+			$field = $provider['meta_key'];
 			if ( isset( $_POST[ $field ] ) ) {
 				update_post_meta( $post_id, $field, sanitize_url( wp_unslash( $_POST[ $field ] ) ) );
 			}
@@ -496,23 +616,25 @@ class Silvertell_Woocommerce_Customisation {
 
 	/**
 	 * Injects the custom CSS and JS specifically formatted to override WooCommerce's default float styles.
-	 * Also includes the JS logic for the WP Media Library frame with explicit scoping.
+	 * Operates universally across the product edit screen and the custom plugin settings page.
 	 *
 	 * @return void
 	 */
 	public function inject_repeater_assets() {
 		$screen = get_current_screen();
-		if ( ! $screen || $screen->post_type !== 'product' ) return;
+		if ( ! $screen || ! in_array( $screen->id, [ 'product', 'woocommerce_page_silvertell-file-importer' ], true ) ) return;
 
-		// Fetch the Target Category IDs for Conditional Logic
-		$eval_slug = get_option( 'silvertell_eval_category_slug', 'evaluation-boards' );
-		$eval_cat  = get_term_by( 'slug', $eval_slug, 'product_cat' );
+		// Fetch the Target Category IDs for Conditional Logic (Only needed on product page)
 		$target_ids = [];
-		if ( $eval_cat ) {
-			$target_ids[] = (int) $eval_cat->term_id;
-			$children = get_term_children( $eval_cat->term_id, 'product_cat' );
-			if ( ! is_wp_error( $children ) ) {
-				$target_ids = array_merge( $target_ids, wp_parse_id_list( $children ) );
+		if ( $screen->id === 'product' ) {
+			$eval_slug = get_option( 'silvertell_eval_category_slug', 'evaluation-boards' );
+			$eval_cat  = get_term_by( 'slug', $eval_slug, 'product_cat' );
+			if ( $eval_cat ) {
+				$target_ids[] = (int) $eval_cat->term_id;
+				$children = get_term_children( $eval_cat->term_id, 'product_cat' );
+				if ( ! is_wp_error( $children ) ) {
+					$target_ids = array_merge( $target_ids, wp_parse_id_list( $children ) );
+				}
 			}
 		}
 		?>
@@ -542,38 +664,39 @@ class Silvertell_Woocommerce_Customisation {
 		</style>
 		<script>
 		jQuery(document).ready(function($) {
-			// --- DYNAMIC CONDITIONAL TAB LOGIC ---
-			var ddEvalCategoryIds = <?php echo wp_json_encode( $target_ids ); ?>;
 			
-			function ddToggleConditionalTabs() {
-				if (!ddEvalCategoryIds || ddEvalCategoryIds.length === 0) return;
+			// --- DYNAMIC CONDITIONAL TAB LOGIC (Product Screen Only) ---
+			if ($('#taxonomy-product_cat').length > 0) {
+				var ddEvalCategoryIds = <?php echo wp_json_encode( $target_ids ); ?>;
 				
-				var isEval = false;
-				
-				$('#taxonomy-product_cat input[type="checkbox"]:checked').each(function() {
-					if (ddEvalCategoryIds.includes(parseInt($(this).val(), 10))) {
-						isEval = true;
-					}
-				});
+				function ddToggleConditionalTabs() {
+					if (!ddEvalCategoryIds || ddEvalCategoryIds.length === 0) return;
+					
+					var isEval = false;
+					$('#taxonomy-product_cat input[type="checkbox"]:checked').each(function() {
+						if (ddEvalCategoryIds.includes(parseInt($(this).val(), 10))) {
+							isEval = true;
+						}
+					});
 
-				if (isEval) {
-					$('.dd-tab-docs, .dd-tab-feats').hide();
-					$('.dd-tab-eval').show();
-					if ($('.dd-tab-docs').hasClass('active') || $('.dd-tab-feats').hasClass('active')) {
-						$('.dd-tab-eval a').trigger('click');
-					}
-				} else {
-					$('.dd-tab-docs, .dd-tab-feats').show();
-					$('.dd-tab-eval').hide();
-					if ($('.dd-tab-eval').hasClass('active')) {
-						$('.general_options a').trigger('click');
+					if (isEval) {
+						$('.dd-tab-docs, .dd-tab-feats').hide();
+						$('.dd-tab-eval').show();
+						if ($('.dd-tab-docs').hasClass('active') || $('.dd-tab-feats').hasClass('active')) {
+							$('.dd-tab-eval a').trigger('click');
+						}
+					} else {
+						$('.dd-tab-docs, .dd-tab-feats').show();
+						$('.dd-tab-eval').hide();
+						if ($('.dd-tab-eval').hasClass('active')) {
+							$('.general_options a').trigger('click');
+						}
 					}
 				}
+
+				ddToggleConditionalTabs();
+				$('#taxonomy-product_cat').on('change', 'input[type="checkbox"]', ddToggleConditionalTabs);
 			}
-
-			ddToggleConditionalTabs();
-			$('#taxonomy-product_cat').on('change', 'input[type="checkbox"]', ddToggleConditionalTabs);
-
 
 			// --- REPEATER LOGIC ---
 			$(document).off('click.ddRepeater');
@@ -608,6 +731,8 @@ class Silvertell_Woocommerce_Customisation {
 				
 				template.find('.dd-file-display').text('No file selected');
 				template.find('.description').remove();
+				// Also clear preview images in settings repeater
+				template.find('img').parent().remove();
 
 				container.append(template);
 				template.slideDown(200);
@@ -631,7 +756,6 @@ class Silvertell_Woocommerce_Customisation {
 			var currentTargetInput;
 			var currentTargetDisplay;
 
-			// This selector now targets both repeater files AND standalone media fields globally
 			$(document).on('click.ddRepeater', '.dd-upload-file', function(e) {
 				e.preventDefault();
 				currentTargetInput = $(this).siblings('.dd-file-input');
@@ -643,7 +767,7 @@ class Silvertell_Woocommerce_Customisation {
 				}
 
 				mediaUploader = wp.media.frames.file_frame = wp.media({
-					title: 'Select or Upload Document',
+					title: 'Select or Upload Media',
 					button: { text: 'Use this file' },
 					multiple: false
 				});
@@ -651,7 +775,20 @@ class Silvertell_Woocommerce_Customisation {
 				mediaUploader.on('select', function() {
 					var attachment = mediaUploader.state().get('selection').first().toJSON();
 					currentTargetInput.val(attachment.id).trigger('input');
-					currentTargetDisplay.text(attachment.filename);
+					
+					// If the file is an image (like a logo), we show "Logo Selected", otherwise filename
+					if (attachment.type === 'image') {
+						currentTargetDisplay.text('Image Selected');
+						// Add a small preview on the settings page
+						var previewContainer = currentTargetInput.parent().siblings('.dd-image-preview');
+						if (previewContainer.length === 0) {
+							currentTargetInput.parent().after('<div class="dd-image-preview" style="margin-top:10px;"><img src="'+attachment.url+'" style="max-height:40px; border:1px solid #ddd; padding:3px; border-radius:4px;" /></div>');
+						} else {
+							previewContainer.find('img').attr('src', attachment.url);
+						}
+					} else {
+						currentTargetDisplay.text(attachment.filename);
+					}
 				});
 
 				mediaUploader.open();

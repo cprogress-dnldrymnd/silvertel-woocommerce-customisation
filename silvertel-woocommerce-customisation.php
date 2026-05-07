@@ -575,18 +575,25 @@ class Silvertell_Woocommerce_Customisation
                     $(this).find('.dd-collapse-row').removeClass('dashicons-arrow-down-alt2').addClass('dashicons-arrow-up-alt2');
                 });
 
+                // WP Media Library Integration for File Uploader (Fixed Scope)
                 var mediaUploader;
+                var currentTargetInput;
+                var currentTargetDisplay;
+
                 $(document).on('click.ddRepeater', '.dd-upload-file', function(e) {
                     e.preventDefault();
-                    var button = $(this);
-                    var inputField = button.siblings('.dd-file-input');
-                    var displaySpan = button.siblings('.dd-file-display');
 
+                    // Update the global target references to the CURRENT button's siblings
+                    currentTargetInput = $(this).siblings('.dd-file-input');
+                    currentTargetDisplay = $(this).siblings('.dd-file-display');
+
+                    // If uploader exists, just open it (it will use the updated targets above)
                     if (mediaUploader) {
                         mediaUploader.open();
                         return;
                     }
 
+                    // Otherwise, instantiate it
                     mediaUploader = wp.media.frames.file_frame = wp.media({
                         title: 'Select or Upload Document',
                         button: {
@@ -595,14 +602,12 @@ class Silvertell_Woocommerce_Customisation
                         multiple: false
                     });
 
+                    // Bind the select event using the dynamic global variables
                     mediaUploader.on('select', function() {
                         var attachment = mediaUploader.state().get('selection').first().toJSON();
 
-                        // Save the ID to the hidden input
-                        inputField.val(attachment.id).trigger('input');
-
-                        // Update the UI text
-                        displaySpan.text(attachment.filename);
+                        currentTargetInput.val(attachment.id).trigger('input');
+                        currentTargetDisplay.text(attachment.filename);
                     });
 
                     mediaUploader.open();

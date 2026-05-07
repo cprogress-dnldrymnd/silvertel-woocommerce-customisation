@@ -649,10 +649,10 @@ class Silvertell_Woocommerce_Customisation
                         multiple: false // Set to true to allow multiple files to be selected
                     });
 
-                    // When a file is selected, grab the URL and set it as the text field's value
+                    // When a file is selected, grab the ID and set it as the text field's value
                     mediaUploader.on('select', function() {
                         var attachment = mediaUploader.state().get('selection').first().toJSON();
-                        inputField.val(attachment.url).trigger('input');
+                        inputField.val(attachment.id).trigger('input');
                     });
 
                     // Open the uploader dialog

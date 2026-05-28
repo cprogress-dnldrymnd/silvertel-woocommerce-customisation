@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, and SKU-to-ID translations.
- * Version: 2.15.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, and SKU-to-ID translations.
+ * Version: 2.16.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -449,9 +449,86 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Core Data Translator: Intercepts raw CSV data, modifies fields, parses hierarchical taxonomies,
-     * builds CPT documents, and repackages array linking IDs before the product saves to the database.
+     * Helper to safely map a string hierarchy into valid terms
      */
+    private function assign_hierarchical_terms_to_post($post_id, $category_string)
+    {
+        // Automatically determine if the taxonomy was registered with a hyphen or underscore
+        $taxonomy = 'product-support-category';
+        if (! taxonomy_exists($taxonomy) && taxonomy_exists('product_support_category')) {
+            $taxonomy = 'product_support_category';
+        }
+
+        if (empty($category_string) || ! taxonomy_exists($taxonomy)) {
+            return;
+        }
+
+        // Clean out HTML entities encoded by the CSV exporter (e.g. &amp;)
+        $category_string = html_entity_decode($category_string, ENT_QUOTES, 'UTF-8');
+        $category_string = str_replace('&amp;', '&', $category_string);
+
+        $terms = array_map('trim', explode('>', $category_string));
+        $parent_id = 0;
+        $assigned_term_ids = [];
+
+        foreach ($terms as $term_name) {
+            if (empty($term_name)) continue;
+
+            // 1. Try to find the exact term strictly mapped to the parent
+            $term_query = get_terms([
+                'taxonomy'   => $taxonomy,
+                'name'       => $term_name,
+                'parent'     => $parent_id,
+                'hide_empty' => false,
+                'fields'     => 'ids'
+            ]);
+
+            if (! empty($term_query) && ! is_wp_error($term_query)) {
+                $parent_id = $term_query[0];
+            } else {
+                // 2. Try falling back to finding the term regardless of parent (in case it was manually created elsewhere)
+                $term_fallback = get_terms([
+                    'taxonomy'   => $taxonomy,
+                    'name'       => $term_name,
+                    'hide_empty' => false,
+                    'fields'     => 'ids'
+                ]);
+
+                if (! empty($term_fallback) && ! is_wp_error($term_fallback)) {
+                    $parent_id = $term_fallback[0];
+                } else {
+                    // 3. Term definitively does not exist, safely create it
+                    $inserted = wp_insert_term($term_name, $taxonomy, ['parent' => $parent_id]);
+
+                    if (! is_wp_error($inserted)) {
+                        $parent_id = (int) $inserted['term_id'];
+                        clean_term_cache($parent_id, $taxonomy); // Flush the cache to prevent loop drops
+                    } elseif ($inserted->get_error_code() === 'term_exists') {
+                        // Handle extreme WP caching lag by extracting the hidden ID
+                        $parent_id = (int) $inserted->get_error_data();
+                    } else {
+                        // Completely unrecoverable, try to salvage via the raw function
+                        $salvage = term_exists($term_name, $taxonomy);
+                        if ($salvage) {
+                            $parent_id = (int) (is_array($salvage) ? $salvage['term_id'] : $salvage);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($parent_id) {
+                $assigned_term_ids[] = (int) $parent_id;
+            }
+        }
+
+        if (! empty($assigned_term_ids)) {
+            // Apply all IDs in the tree natively to the post object
+            wp_set_object_terms($post_id, array_unique($assigned_term_ids), $taxonomy, false);
+        }
+    }
+
     public function intercept_meta_for_sideload($product, $data)
     {
         $meta_keys_string = get_option('silvertell_file_meta_keys', '_manual');
@@ -581,46 +658,9 @@ class Silvertell_Woocommerce_Customisation
                         if ($support_post_id && ! is_wp_error($support_post_id)) {
                             if ($file) update_post_meta($support_post_id, 'pdf_file', $file);
 
-                            // Execute Advanced Hierarchical Taxonomy Logic
+                            // Fire the robust hierarchical engine
                             if (! empty($cat_string)) {
-
-                                // Decode entities like &amp; generated by CSV processors
-                                $cat_string = html_entity_decode($cat_string, ENT_QUOTES, 'UTF-8');
-                                $terms = array_map('trim', explode('>', $cat_string));
-                                $parent_id = 0;
-                                $assigned_terms = [];
-
-                                foreach ($terms as $term_name) {
-                                    if (empty($term_name)) continue;
-
-                                    $term_exists = term_exists($term_name, 'product-support-category', $parent_id);
-
-                                    if (! $term_exists) {
-                                        $inserted = wp_insert_term($term_name, 'product-support-category', ['parent' => $parent_id]);
-
-                                        if (is_wp_error($inserted)) {
-                                            // Handle WP Cache Lag during mass imports
-                                            if ($inserted->get_error_code() === 'term_exists') {
-                                                $parent_id = (int) $inserted->get_error_data();
-                                            } else {
-                                                break; // Stop parsing deeper if unrecoverable
-                                            }
-                                        } else {
-                                            $parent_id = (int) $inserted['term_id'];
-                                        }
-                                    } else {
-                                        $parent_id = (int) (is_array($term_exists) ? $term_exists['term_id'] : $term_exists);
-                                    }
-
-                                    if ($parent_id) {
-                                        $assigned_terms[] = $parent_id;
-                                    }
-                                }
-
-                                if (! empty($assigned_terms)) {
-                                    // Map the full parent/child hierarchy directly to the post
-                                    wp_set_object_terms($support_post_id, array_unique(array_map('intval', $assigned_terms)), 'product-support-category', false);
-                                }
+                                $this->assign_hierarchical_terms_to_post($support_post_id, $cat_string);
                             }
 
                             // Collect the ID for linking to the product

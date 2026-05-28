@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation with hierarchical taxonomies, native repeater fields, conditional UI sections, and SKU-to-ID translations.
- * Version: 2.13.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, multi-select document linking, native repeater fields, conditional UI sections, and SKU-to-ID translations.
+ * Version: 2.14.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -21,17 +21,11 @@ if (! defined('ABSPATH')) {
 class Silvertell_Woocommerce_Customisation
 {
 
-    /**
-     * Initializes the class and registers all hooks.
-     */
     public function __construct()
     {
         $this->register_hooks();
     }
 
-    /**
-     * Registers all WordPress and WooCommerce action and filter hooks.
-     */
     private function register_hooks()
     {
         // Core Importer Logic
@@ -57,18 +51,11 @@ class Silvertell_Woocommerce_Customisation
         add_action('admin_enqueue_scripts', [$this, 'enqueue_core_assets']);
     }
 
-    /**
-     * Reduces the WooCommerce CSV import batch size.
-     * Prevents AJAX timeouts when sideloading heavy external files.
-     */
     public function reduce_import_batch_size($size)
     {
         return 5;
     }
 
-    /**
-     * Enqueues core WordPress UI and Media scripts on necessary admin screens.
-     */
     public function enqueue_core_assets($hook)
     {
         if (in_array($hook, ['post.php', 'post-new.php', 'woocommerce_page_silvertell-file-importer'], true)) {
@@ -77,9 +64,6 @@ class Silvertell_Woocommerce_Customisation
         }
     }
 
-    /**
-     * Registers the Product Support CPT meta box for PDF uploads.
-     */
     public function register_product_support_meta_box()
     {
         add_meta_box(
@@ -92,9 +76,6 @@ class Silvertell_Woocommerce_Customisation
         );
     }
 
-    /**
-     * Renders the PDF upload UI for the Product Support post type.
-     */
     public function render_product_support_meta_box($post)
     {
         wp_nonce_field('silvertell_save_pdf_file', 'silvertell_pdf_file_nonce');
@@ -113,9 +94,6 @@ class Silvertell_Woocommerce_Customisation
         echo '</div></div>';
     }
 
-    /**
-     * Saves the PDF file meta data for the Product Support post type.
-     */
     public function save_product_support_meta($post_id)
     {
         if (! isset($_POST['silvertell_pdf_file_nonce']) || ! wp_verify_nonce($_POST['silvertell_pdf_file_nonce'], 'silvertell_save_pdf_file')) return;
@@ -193,7 +171,7 @@ class Silvertell_Woocommerce_Customisation
                             <th scope="row"><label for="silvertell_eval_category_slug">Eval Board Category Slug</label></th>
                             <td>
                                 <input type="text" id="silvertell_eval_category_slug" name="silvertell_eval_category_slug" value="<?php echo esc_attr($eval_slug); ?>" class="regular-text" style="width: 100%;">
-                                <p class="description">Enter the exact slug of the Evaluation Boards category. If checked, the Features tab and repeater document section will hide automatically.</p>
+                                <p class="description">Enter the exact slug of the Evaluation Boards category. If checked, the Features tab and document section will hide automatically.</p>
                             </td>
                         </tr>
                     </tbody>
@@ -325,24 +303,34 @@ class Silvertell_Woocommerce_Customisation
 
         // Tab 2: Documents
         echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
+
         echo '<div class="dd-manual-field-wrapper">';
         $this->render_single_file_upload_field('_manual', __('Manual', 'silvertell-wc-customisation'), 'Upload the primary product or evaluation board manual.');
         echo '</div>';
 
-        echo '<div class="options_group dd-additional-documents-wrapper"><div class="dd-repeater-header-title"><strong>' . __('Documents', 'silvertell-wc-customisation') . '</strong></div>';
-        echo '<div class="dd-repeater-container" data-type="documents">';
-        $documents = get_post_meta($post->ID, '_documents', true);
-        if (! empty($documents) && is_array($documents)) {
-            foreach ($documents as $doc) {
-                $name_val = isset($doc['name']) ? $doc['name'] : '';
-                $file_val = isset($doc['file']) ? $doc['file'] : '';
-                $display_file = is_numeric($file_val) ? wp_get_attachment_url($file_val) : $file_val;
-                $this->render_document_row($name_val, $display_file, $file_val, false);
-            }
+        echo '<div class="options_group dd-additional-documents-wrapper">';
+
+        // Multi-select Field for Product Support CPTs
+        $current_linked_docs = get_post_meta($post->ID, '_linked_documents', true);
+        if (! is_array($current_linked_docs)) $current_linked_docs = [];
+
+        $support_posts = get_posts([
+            'post_type'   => 'product-support',
+            'numberposts' => -1,
+            'post_status' => 'publish'
+        ]);
+
+        echo '<p class="form-field _linked_documents_field">';
+        echo '<label for="_linked_documents">' . __('Linked Documents', 'silvertell-wc-customisation') . '</label>';
+        echo '<select id="_linked_documents" name="_linked_documents[]" class="wc-enhanced-select" multiple="multiple" style="width: 50%;">';
+        foreach ($support_posts as $sp) {
+            $selected = in_array($sp->ID, $current_linked_docs) ? 'selected="selected"' : '';
+            echo '<option value="' . esc_attr($sp->ID) . '" ' . $selected . '>' . esc_html($sp->post_title) . '</option>';
         }
-        $this->render_document_row('', '', '', true);
-        echo '</div>';
-        echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __('Add Document', 'silvertell-wc-customisation') . '</button></div>';
+        echo '</select>';
+        echo wp_kses_post(wc_help_tip(__('Select Product Support documents to link to this product.', 'silvertell-wc-customisation')));
+        echo '</p>';
+
         echo '</div></div>';
 
         // Tab 3: Features
@@ -383,43 +371,6 @@ class Silvertell_Woocommerce_Customisation
             echo '</span>';
         }
         echo '</p></div>';
-    }
-
-    private function render_document_row($name = '', $display_file = '', $raw_file = '', $is_template = false)
-    {
-        $row_class = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
-        $input_attr = $is_template ? 'disabled="disabled"' : '';
-        $filename_display = $display_file ? basename(wp_parse_url($display_file, PHP_URL_PATH)) : 'No file selected';
-    ?>
-        <div class="<?php echo esc_attr($row_class); ?>">
-            <div class="dd-repeater-header">
-                <div class="dd-header-left">
-                    <span class="dashicons dashicons-menu dd-drag-handle"></span>
-                    <span class="dd-row-title"><?php echo $name ? esc_html($name) : 'New Document'; ?></span>
-                </div>
-                <div class="dd-header-right dd-repeater-actions">
-                    <span class="dashicons dashicons-arrow-down-alt2 dd-collapse-row" title="Toggle"></span>
-                    <span class="dashicons dashicons-admin-page dd-duplicate-row" title="Duplicate"></span>
-                    <span class="dashicons dashicons-trash dd-delete-row" title="Delete"></span>
-                </div>
-            </div>
-            <div class="dd-repeater-content">
-                <div class="dd-field-group">
-                    <label>Document Name</label>
-                    <input type="text" name="dd_doc_names[]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr($name); ?>" <?php echo $input_attr; ?> />
-                </div>
-                <div class="dd-field-group">
-                    <label>Document File</label>
-                    <div class="dd-file-wrap">
-                        <input type="hidden" name="dd_doc_files[]" class="dd-file-input" value="<?php echo esc_attr($raw_file); ?>" <?php echo $input_attr; ?> />
-                        <button type="button" class="button dd-upload-file">Select File</button>
-                        <span class="dd-file-display"><?php echo esc_html($filename_display); ?></span>
-                    </div>
-                    <?php if ($display_file && !$is_template) echo '<span class="description" style="display:block; margin-top:5px;"><a href="' . esc_url($display_file) . '" target="_blank">Preview Current File</a></span>'; ?>
-                </div>
-            </div>
-        </div>
-    <?php
     }
 
     private function render_feature_row($feature = '', $is_template = false)
@@ -470,24 +421,13 @@ class Silvertell_Woocommerce_Customisation
             update_post_meta($post_id, '_linked_eval_board', absint($_POST['_linked_eval_board']));
         }
 
-        // 3. Save Documents Array
-        $doc_names = isset($_POST['dd_doc_names']) && is_array($_POST['dd_doc_names']) ? wp_unslash($_POST['dd_doc_names']) : [];
-        $doc_files = isset($_POST['dd_doc_files']) && is_array($_POST['dd_doc_files']) ? wp_unslash($_POST['dd_doc_files']) : [];
-
-        $doc_names = array_values($doc_names);
-        $doc_files = array_values($doc_files);
-        $max_docs = max(count($doc_names), count($doc_files));
-        $final_docs = [];
-
-        for ($i = 0; $i < $max_docs; $i++) {
-            $name = isset($doc_names[$i]) ? sanitize_text_field($doc_names[$i]) : '';
-            $file = isset($doc_files[$i]) ? sanitize_text_field($doc_files[$i]) : '';
-            if ($name !== '' || $file !== '') $final_docs[] = ['name' => $name, 'file' => $file];
+        // 3. Save Linked Documents (Multi-select array)
+        if (isset($_POST['_linked_documents']) && is_array($_POST['_linked_documents'])) {
+            $sanitized_ids = array_map('absint', $_POST['_linked_documents']);
+            update_post_meta($post_id, '_linked_documents', $sanitized_ids);
+        } else {
+            update_post_meta($post_id, '_linked_documents', []);
         }
-
-        update_post_meta($post_id, '_documents', $final_docs);
-        $this->clear_dynamic_meta_keys($post_id, '_document_name_');
-        $this->clear_dynamic_meta_keys($post_id, '_document_file_');
 
         // 4. Save Features Array
         $features_data = isset($_POST['dd_feature_texts']) && is_array($_POST['dd_feature_texts']) ? wp_unslash($_POST['dd_feature_texts']) : [];
@@ -511,7 +451,7 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Core Data Translator: Intercepts raw CSV data, modifies fields, parses hierarchical taxonomies,
-     * builds CPT documents, and repackages arrays before the product saves to the database.
+     * builds CPT documents, and repackages array linking IDs before the product saves to the database.
      */
     public function intercept_meta_for_sideload($product, $data)
     {
@@ -606,7 +546,8 @@ class Silvertell_Woocommerce_Customisation
         // Rebuild Arrays and Deploy Document CPTs
         if ($has_doc_updates) {
             ksort($incoming_docs);
-            $final_docs = [];
+            $linked_doc_ids = [];
+
             foreach ($incoming_docs as $doc) {
                 $name = isset($doc['name']) ? $doc['name'] : '';
                 $file = isset($doc['file']) ? $doc['file'] : '';
@@ -664,15 +605,26 @@ class Silvertell_Woocommerce_Customisation
                                     wp_set_object_terms($support_post_id, [(int) $final_term_id], 'product-support-category', false);
                                 }
                             }
+
+                            // Collect the ID for linking to the product
+                            $linked_doc_ids[] = $support_post_id;
                         }
                     }
                     // --- END CPT GENERATION ---
-
-                    // Retain array structure for WooCommerce Product Data tabs compatibility
-                    $final_docs[] = ['name' => $name, 'file' => $file];
                 }
             }
-            $product->update_meta_data('_documents', $final_docs);
+
+            // Append the generated CPT IDs to the product's linked documents list
+            if (! empty($linked_doc_ids)) {
+                $existing_linked = $product->get_meta('_linked_documents');
+                if (! is_array($existing_linked)) $existing_linked = [];
+
+                $merged = array_unique(array_merge($existing_linked, $linked_doc_ids));
+                $product->update_meta_data('_linked_documents', $merged);
+            }
+
+            // Clean out legacy array key if it exists
+            $product->delete_meta_data('_documents');
         }
 
         if ($has_feature_updates) {
@@ -714,13 +666,9 @@ class Silvertell_Woocommerce_Customisation
         return $attachment_id;
     }
 
-    /**
-     * Injects custom CSS/JS payload to restructure native UI tables to match our repeater style.
-     */
     public function inject_repeater_assets()
     {
         $screen = get_current_screen();
-        // Allow scripts to load on Products, Silvertell Settings, AND the Custom Post Type
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'woocommerce_page_silvertell-file-importer'], true)) return;
 
         $target_ids = [];

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Evaluation Board management.
- * Version: 2.19.1
+ * Version: 2.19.2
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -313,9 +313,54 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    // --- MISSING FUNCTION RESTORED HERE ---
+    private function render_settings_provider_row($name = '', $key = '', $logo = '', $is_template = false)
+    {
+        $row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
+        $input_attr = $is_template ? 'disabled="disabled"' : '';
+        $logo_url   = is_numeric($logo) ? wp_get_attachment_image_url($logo, 'thumbnail') : $logo;
+        $logo_disp  = $logo_url ? 'Logo Selected' : 'No Logo';
+    ?>
+        <div class="<?php echo esc_attr($row_class); ?>">
+            <div class="dd-repeater-header">
+                <div class="dd-header-left">
+                    <span class="dashicons dashicons-menu dd-drag-handle"></span>
+                    <span class="dd-row-title"><?php echo $name ? esc_html($name) : 'New Provider'; ?></span>
+                </div>
+                <div class="dd-header-right dd-repeater-actions">
+                    <span class="dashicons dashicons-arrow-down-alt2 dd-collapse-row" title="Toggle"></span>
+                    <span class="dashicons dashicons-admin-page dd-duplicate-row" title="Duplicate"></span>
+                    <span class="dashicons dashicons-trash dd-delete-row" title="Delete"></span>
+                </div>
+            </div>
+            <div class="dd-repeater-content">
+                <div style="display:flex; gap:20px;">
+                    <div class="dd-field-group" style="flex:1;">
+                        <label>Provider Name</label>
+                        <input type="text" name="silvertell_sample_providers[name][]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr($name); ?>" <?php echo $input_attr; ?> placeholder="e.g. Farnell" />
+                    </div>
+                    <div class="dd-field-group" style="flex:1;">
+                        <label>Meta Key</label>
+                        <input type="text" name="silvertell_sample_providers[key][]" class="dd-full-width" value="<?php echo esc_attr($key); ?>" <?php echo $input_attr; ?> placeholder="e.g. _farnel_url" />
+                    </div>
+                </div>
+                <div class="dd-field-group" style="margin-top:15px;">
+                    <label>Provider Logo</label>
+                    <div class="dd-file-wrap">
+                        <input type="hidden" name="silvertell_sample_providers[logo][]" class="dd-file-input" value="<?php echo esc_attr($logo); ?>" <?php echo $input_attr; ?> />
+                        <button type="button" class="button dd-upload-file">Select Image</button>
+                        <span class="dd-file-display"><?php echo esc_html($logo_disp); ?></span>
+                    </div>
+                    <?php if ($logo_url && !$is_template) echo '<div style="margin-top:10px;"><img src="' . esc_url($logo_url) . '" style="max-height:40px; border:1px solid #ddd; padding:3px; border-radius:4px;" /></div>'; ?>
+                </div>
+            </div>
+        </div>
+    <?php
+    }
+    // --- END MISSING FUNCTION ---
+
     public function render_eb_importer_on_list_view()
     {
-        // Fail-safe to ensure function is fully loaded before referencing
         if (!function_exists('get_current_screen')) {
             return;
         }
@@ -345,7 +390,6 @@ class Silvertell_Woocommerce_Customisation
         if (!isset($_POST['silvertell_import_eb_nonce']) || !wp_verify_nonce($_POST['silvertell_import_eb_nonce'], 'silvertell_import_eb')) return;
         if (!current_user_can('manage_woocommerce')) return;
 
-        // Fail-safe for empty/oversized file errors
         if (empty($_FILES['eb_csv_file']['tmp_name'])) {
             $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: No file selected or file exceeds maximum server upload size.</p></div>';
             return;
@@ -355,7 +399,6 @@ class Silvertell_Woocommerce_Customisation
         if (($handle = fopen($file, "r")) !== FALSE) {
             $headers = fgetcsv($handle, 1000, ",");
 
-            // Protect against perfectly blank CSVs
             if (!$headers || !isset($headers[0])) {
                 fclose($handle);
                 $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: The CSV file is blank or improperly formatted.</p></div>';
@@ -473,7 +516,6 @@ class Silvertell_Woocommerce_Customisation
     {
         global $post;
 
-        // Fail-safe: Restrict to valid WP_Post objects to prevent property-on-null errors
         if (empty($post) || !is_object($post) || $post->post_parent > 0) return;
 
         $eval_boards = get_posts([
@@ -758,7 +800,6 @@ class Silvertell_Woocommerce_Customisation
                     if (! empty($board_posts)) {
                         $product->update_meta_data('_linked_eval_board', $board_posts[0]->ID);
                     } else {
-                        // Fail-safe: Removed deprecated get_page_by_title entirely
                         $board_by_title = get_posts([
                             'post_type'   => 'evaluation-board',
                             'title'       => $val,

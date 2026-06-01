@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, and SKU-to-ID translations.
- * Version: 2.17.0
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Evaluation Board management.
+ * Version: 2.18.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -15,8 +15,6 @@ if (! defined('ABSPATH')) {
 
 /**
  * Class Silvertell_Woocommerce_Customisation
- * Encapsulates custom WooCommerce modifications, including dynamic file sideloading during CSV imports,
- * administrative settings interfaces, bespoke product data tabs, and advanced repeater functionalities.
  */
 class Silvertell_Woocommerce_Customisation
 {
@@ -31,9 +29,10 @@ class Silvertell_Woocommerce_Customisation
         // Core CPT Registrations
         add_action('init', [$this, 'register_evaluation_board_cpt']);
 
-        // Core Importer Logic
+        // Core Importers & Sideload Logic
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
         add_filter('woocommerce_product_import_batch_size', [$this, 'reduce_import_batch_size']);
+        add_action('admin_init', [$this, 'process_evaluation_board_import']);
 
         // Admin Settings
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -42,6 +41,10 @@ class Silvertell_Woocommerce_Customisation
         // Custom Product Support Meta Box
         add_action('add_meta_boxes', [$this, 'register_product_support_meta_box']);
         add_action('save_post_product-support', [$this, 'save_product_support_meta']);
+
+        // Custom Evaluation Board Meta Box
+        add_action('add_meta_boxes', [$this, 'register_eb_meta_box']);
+        add_action('save_post_evaluation-board', [$this, 'save_eb_meta']);
 
         // Custom WooCommerce Tabs & Panels
         add_filter('woocommerce_product_data_tabs', [$this, 'add_custom_product_data_tabs']);
@@ -73,9 +76,9 @@ class Silvertell_Woocommerce_Customisation
         $args = [
             'label'                 => __('Evaluation Board', 'silvertell-wc-customisation'),
             'labels'                => $labels,
-            'supports'              => ['title', 'editor', 'thumbnail', 'custom-fields'],
-            'hierarchical'          => false,
-            'public'                => false, // Disabled frontend single view
+            'supports'              => ['title', 'editor', 'thumbnail', 'custom-fields', 'page-attributes'],
+            'hierarchical'          => true,
+            'public'                => false,
             'show_ui'               => true,
             'show_in_menu'          => true,
             'menu_position'         => 5,
@@ -85,11 +88,24 @@ class Silvertell_Woocommerce_Customisation
             'can_export'            => true,
             'has_archive'           => false,
             'exclude_from_search'   => true,
-            'publicly_queryable'    => false, // Disabled frontend queries
-            'rewrite'               => false, // No URL rewriting needed
+            'publicly_queryable'    => false,
+            'rewrite'               => false,
         ];
         
         register_post_type('evaluation-board', $args);
+
+        register_taxonomy('evaluation-board-category', ['evaluation-board'], [
+            'labels' => [
+                'name' => __('Evaluation Board Categories', 'silvertell-wc-customisation'),
+                'singular_name' => __('Evaluation Board Category', 'silvertell-wc-customisation'),
+            ],
+            'hierarchical' => true,
+            'public' => false,
+            'show_ui' => true,
+            'show_admin_column' => true,
+            'show_in_nav_menus' => false,
+            'show_tagcloud' => false,
+        ]);
     }
 
     public function reduce_import_batch_size($size)
@@ -146,6 +162,71 @@ class Silvertell_Woocommerce_Customisation
         }
     }
 
+    public function register_eb_meta_box()
+    {
+        add_meta_box(
+            'silvertell_eb_details',
+            __('Evaluation Board Details', 'silvertell-wc-customisation'),
+            [$this, 'render_eb_meta_box'],
+            'evaluation-board',
+            'normal',
+            'high'
+        );
+    }
+
+    public function render_eb_meta_box($post)
+    {
+        wp_nonce_field('silvertell_save_eb_meta', 'silvertell_eb_meta_nonce');
+        
+        echo '<div class="dd-panel-wrapper" style="padding: 10px 0 !important;">';
+        
+        echo '<div class="dd-field-group">';
+        echo '<label style="display:block; font-weight:600; margin-bottom:10px;">Unique Code</label>';
+        $ucode = get_post_meta($post->ID, '_unique_code', true);
+        echo '<input type="text" name="_unique_code" value="' . esc_attr($ucode) . '" style="max-width:400px; width:100%;" />';
+        echo '<p class="description">Used as the primary identifier during importing.</p>';
+        echo '</div><hr style="margin:20px 0;"/>';
+        
+        echo '<h3 style="margin-top:0;">Document Configuration</h3>';
+        $this->render_single_file_upload_field('_manual', __('Manual File', 'silvertell-wc-customisation'), 'Upload the main evaluation board manual.', '_manual', $post->ID);
+
+        echo '<hr style="margin:20px 0;"/>';
+        echo '<h3 style="margin-top:0;">Buy Samples</h3>';
+        
+        $providers = $this->get_sample_providers();
+        if (!empty($providers)) {
+            foreach ($providers as $provider) {
+                $val = get_post_meta($post->ID, $provider['meta_key'], true);
+                echo '<div class="dd-field-group" style="margin-bottom:10px;">';
+                echo '<label style="display:block; font-weight:600; margin-bottom:5px;">' . esc_html($provider['name']) . ' URL</label>';
+                echo '<input type="url" name="' . esc_attr($provider['meta_key']) . '" value="' . esc_attr($val) . '" style="max-width:400px; width:100%;" />';
+                echo '</div>';
+            }
+        } else {
+            echo '<p>No sample providers configured. Add them in WooCommerce > Silvertell Settings.</p>';
+        }
+
+        echo '</div>';
+    }
+
+    public function save_eb_meta($post_id)
+    {
+        if (!isset($_POST['silvertell_eb_meta_nonce']) || !wp_verify_nonce($_POST['silvertell_eb_meta_nonce'], 'silvertell_save_eb_meta')) return;
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
+        if (!current_user_can('edit_post', $post_id)) return;
+
+        if (isset($_POST['_unique_code'])) update_post_meta($post_id, '_unique_code', sanitize_text_field($_POST['_unique_code']));
+        if (isset($_POST['_manual'])) update_post_meta($post_id, '_manual', sanitize_text_field($_POST['_manual']));
+
+        $providers = $this->get_sample_providers();
+        foreach ($providers as $provider) {
+            $field = $provider['meta_key'];
+            if (isset($_POST[$field])) {
+                update_post_meta($post_id, $field, sanitize_url($_POST[$field]));
+            }
+        }
+    }
+
     public function add_settings_page()
     {
         add_submenu_page('woocommerce', 'Silvertell Advanced Customisations', 'Silvertell Settings', 'manage_woocommerce', 'silvertell-file-importer', [$this, 'render_settings_page']);
@@ -197,7 +278,7 @@ class Silvertell_Woocommerce_Customisation
             <h1>WooCommerce Advanced Customisations</h1>
             <form method="post" action="options.php">
                 <?php settings_fields('silvertell_file_importer_group'); ?>
-                <h2 class="title">Importer Logic</h2>
+                <h2 class="title">Product Importer Logic</h2>
                 <table class="form-table" role="presentation">
                     <tbody>
                         <tr>
@@ -210,7 +291,7 @@ class Silvertell_Woocommerce_Customisation
                 </table>
                 <hr style="margin: 30px 0;">
                 <h2 class="title">Buy Samples Providers</h2>
-                <p class="description" style="margin-bottom:15px;">Configure the dynamic providers for the "Buy Samples" product tab. Meta keys should be lowercase with underscores.</p>
+                <p class="description" style="margin-bottom:15px;">Configure the dynamic providers for the "Buy Samples" product & evaluation board tab. Meta keys should be lowercase with underscores.</p>
                 <div class="dd-repeater-container" data-type="providers">
                     <?php
                     if (! empty($providers)) {
@@ -225,6 +306,24 @@ class Silvertell_Woocommerce_Customisation
                     <button type="button" class="button button-secondary dd-add-row">Add Provider</button>
                 </div>
                 <?php submit_button('Save All Settings', 'primary', 'submit', true, ['style' => 'font-size:16px; padding: 5px 30px;']); ?>
+            </form>
+
+            <hr style="margin: 40px 0;">
+            <h2 class="title">Evaluation Board Importer</h2>
+            <p class="description">Upload your CSV to import Evaluation Boards natively into the CPT. The system will process Unique Codes, map hierarchy recursively, generate categories, sideload images, and dynamically assign <code>Meta: _*</code> fields (e.g. <code>Meta: _manual</code>, <code>Meta: _farnell_url</code>).</p>
+            <form method="post" enctype="multipart/form-data" action="">
+                <?php wp_nonce_field('silvertell_import_eb', 'silvertell_import_eb_nonce'); ?>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><label for="eb_csv_file">Evaluation Board CSV</label></th>
+                            <td>
+                                <input type="file" id="eb_csv_file" name="eb_csv_file" accept=".csv" required>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <?php submit_button('Import Evaluation Boards', 'secondary', 'import_eb_submit', false); ?>
             </form>
         </div>
     <?php
@@ -274,6 +373,114 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
+    public function process_evaluation_board_import()
+    {
+        if (!isset($_POST['import_eb_submit']) || !isset($_FILES['eb_csv_file'])) return;
+        if (!isset($_POST['silvertell_import_eb_nonce']) || !wp_verify_nonce($_POST['silvertell_import_eb_nonce'], 'silvertell_import_eb')) return;
+        if (!current_user_can('manage_woocommerce')) return;
+
+        $file = $_FILES['eb_csv_file']['tmp_name'];
+        if (($handle = fopen($file, "r")) !== FALSE) {
+            $headers = fgetcsv($handle, 1000, ",");
+            $headers[0] = trim($headers[0], "\xEF\xBB\xBF"); 
+            
+            $delayed_parents = [];
+
+            while (($data = fgetcsv($handle, 5000, ",")) !== FALSE) {
+                $row = [];
+                foreach ($headers as $index => $key) {
+                    $row[trim($key)] = isset($data[$index]) ? trim($data[$index]) : '';
+                }
+
+                $name = $row['Name'] ?? '';
+                $unique_code = $row['Unique Code'] ?? '';
+                if (empty($name)) continue;
+
+                $existing_id = 0;
+                if (!empty($unique_code)) {
+                    $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1]);
+                    if (!empty($existing)) $existing_id = $existing[0];
+                }
+                if (!$existing_id) {
+                    $existing = get_posts(['post_type' => 'evaluation-board', 'title' => $name, 'post_status' => 'any', 'fields' => 'ids', 'numberposts' => 1]);
+                    if (!empty($existing)) $existing_id = $existing[0];
+                }
+
+                $post_data = [
+                    'post_title'   => $name,
+                    'post_content' => $row['Description'] ?? '',
+                    'post_status'  => 'publish',
+                    'post_type'    => 'evaluation-board',
+                ];
+
+                if ($existing_id) {
+                    $post_data['ID'] = $existing_id;
+                    $post_id = wp_update_post($post_data);
+                } else {
+                    $post_id = wp_insert_post($post_data);
+                }
+
+                if ($post_id && !is_wp_error($post_id)) {
+                    if (!empty($unique_code)) update_post_meta($post_id, '_unique_code', $unique_code);
+
+                    foreach ($row as $col_key => $col_val) {
+                        if (strpos($col_key, 'Meta: ') === 0 && !empty($col_val)) {
+                            $meta_key = substr($col_key, 6);
+                            if ($meta_key === '_manual' && filter_var($col_val, FILTER_VALIDATE_URL)) {
+                                $attach_id = $this->sideload_file_to_media_library($col_val, $post_id);
+                                if (!is_wp_error($attach_id)) {
+                                    update_post_meta($post_id, $meta_key, $attach_id);
+                                } else {
+                                    update_post_meta($post_id, $meta_key, $col_val);
+                                }
+                            } else {
+                                update_post_meta($post_id, $meta_key, $col_val);
+                            }
+                        }
+                    }
+
+                    if (!empty($row['Categories'])) {
+                        $chains = array_map('trim', explode(',', $row['Categories']));
+                        foreach ($chains as $chain) {
+                            $this->assign_hierarchical_terms_to_post($post_id, $chain, 'evaluation-board-category');
+                        }
+                    }
+
+                    if (!empty($row['Images']) && filter_var($row['Images'], FILTER_VALIDATE_URL)) {
+                        $attach_id = $this->sideload_file_to_media_library($row['Images'], $post_id);
+                        if (!is_wp_error($attach_id)) {
+                            set_post_thumbnail($post_id, $attach_id);
+                        }
+                    }
+
+                    if (!empty($row['Parent'])) {
+                        $delayed_parents[$post_id] = $row['Parent'];
+                    }
+                }
+            }
+            fclose($handle);
+
+            if (!empty($delayed_parents)) {
+                foreach ($delayed_parents as $child_id => $parent_code) {
+                    $parent_query = get_posts([
+                        'post_type'   => 'evaluation-board', 
+                        'meta_key'    => '_unique_code', 
+                        'meta_value'  => $parent_code, 
+                        'fields'      => 'ids',
+                        'numberposts' => 1
+                    ]);
+                    if (!empty($parent_query)) {
+                        wp_update_post(['ID' => $child_id, 'post_parent' => $parent_query[0]]);
+                    }
+                }
+            }
+
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>Evaluation Boards successfully imported/updated.</p></div>';
+            });
+        }
+    }
+
     public function add_custom_product_data_tabs($tabs)
     {
         $all_types = ['show_if_simple', 'show_if_variable', 'show_if_external', 'show_if_grouped'];
@@ -289,7 +496,6 @@ class Silvertell_Woocommerce_Customisation
 
         if ($post->post_parent > 0) return;
 
-        // Switched from wc_get_products to standard get_posts for the new CPT
         $eval_boards = get_posts([
             'post_type'   => 'evaluation-board',
             'numberposts' => -1,
@@ -299,7 +505,9 @@ class Silvertell_Woocommerce_Customisation
         $options = ['' => __('Select an Evaluation Board...', 'silvertell-wc-customisation')];
         if (! empty($eval_boards)) {
             foreach ($eval_boards as $board) {
-                $options[$board->ID] = $board->post_title . ' (#' . $board->ID . ')';
+                $code = get_post_meta($board->ID, '_unique_code', true);
+                $label = $board->post_title . ($code ? ' (' . $code . ')' : '');
+                $options[$board->ID] = $label;
             }
         }
 
@@ -331,13 +539,9 @@ class Silvertell_Woocommerce_Customisation
         }
         echo '</div>';
 
-        // Tab 2: Documents
+        // Tab 2: Documents (Manual field removed per request)
         echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
-        echo '<div class="dd-manual-field-wrapper">';
-        $this->render_single_file_upload_field('_manual', __('Manual', 'silvertell-wc-customisation'), 'Upload the primary product or evaluation board manual.');
-        echo '</div>';
-
-        echo '<div class="options_group dd-additional-documents-wrapper">';
+        echo '<div class="options_group dd-additional-documents-wrapper" style="padding-top:15px;">';
 
         // Multi-select Field for Product Support CPTs
         $current_linked_docs = get_post_meta($post->ID, '_linked_documents', true);
@@ -378,23 +582,27 @@ class Silvertell_Woocommerce_Customisation
         echo '</div></div>';
     }
 
-    private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null)
+    private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null, $post_id = null)
     {
-        global $post;
+        if (!$post_id) {
+            global $post;
+            $post_id = $post ? $post->ID : 0;
+        }
+
         $html_name = $html_name ? $html_name : $meta_key;
-        $raw_val = get_post_meta($post->ID, $meta_key, true);
+        $raw_val = get_post_meta($post_id, $meta_key, true);
         $display_file = is_numeric($raw_val) ? wp_get_attachment_url($raw_val) : $raw_val;
         $filename_display = $display_file ? basename(wp_parse_url($display_file, PHP_URL_PATH)) : 'No file selected';
 
-        echo '<div class="options_group"><p class="form-field ' . esc_attr($html_name) . '_field">';
-        echo '<label for="' . esc_attr($html_name) . '">' . esc_html($label) . '</label>';
-        echo '<span class="dd-file-wrap" style="display:inline-flex; align-items:center; gap:10px; flex-grow:1;">';
+        echo '<div class="options_group"><p class="form-field ' . esc_attr($html_name) . '_field" style="padding:0;">';
+        echo '<label for="' . esc_attr($html_name) . '" style="display:block; font-weight:600; margin-bottom:5px;">' . esc_html($label) . '</label>';
+        echo '<span class="dd-file-wrap" style="display:flex; align-items:center; gap:10px; width:100%;">';
         echo '<input type="hidden" name="' . esc_attr($html_name) . '" id="' . esc_attr($html_name) . '" class="dd-file-input" value="' . esc_attr($raw_val) . '" />';
-        echo '<button type="button" class="button dd-upload-file">Select File</button>';
+        echo '<button type="button" class="button button-primary dd-upload-file">Select File</button>';
         echo '<span class="dd-file-display" style="font-weight:500; color:#2271b1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">' . esc_html($filename_display) . '</span>';
         echo '</span>';
         if ($description || $display_file) {
-            echo '<span class="description" style="display:block; margin-top:8px; margin-left:150px;">';
+            echo '<span class="description" style="display:block; margin-top:8px;">';
             if ($description) echo esc_html($description) . '<br>';
             if ($display_file) echo '<a href="' . esc_url($display_file) . '" target="_blank">Preview Current File</a>';
             echo '</span>';
@@ -443,9 +651,6 @@ class Silvertell_Woocommerce_Customisation
         }
 
         // 2. Save Single Meta Fields
-        if (isset($_POST['_manual'])) {
-            update_post_meta($post_id, '_manual', sanitize_text_field(wp_unslash($_POST['_manual'])));
-        }
         if (isset($_POST['_linked_eval_board'])) {
             update_post_meta($post_id, '_linked_eval_board', absint($_POST['_linked_eval_board']));
         }
@@ -478,13 +683,8 @@ class Silvertell_Woocommerce_Customisation
         $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s", $post_id, $wpdb->esc_like($prefix) . '%'));
     }
 
-    private function assign_hierarchical_terms_to_post($post_id, $category_string)
+    private function assign_hierarchical_terms_to_post($post_id, $category_string, $taxonomy = 'product-support-category')
     {
-        $taxonomy = 'product-support-category';
-        if (! taxonomy_exists($taxonomy) && taxonomy_exists('product_support_category')) {
-            $taxonomy = 'product_support_category';
-        }
-
         if (empty($category_string) || ! taxonomy_exists($taxonomy)) {
             return;
         }
@@ -564,16 +764,21 @@ class Silvertell_Woocommerce_Customisation
             $meta_key   = $meta_obj->key;
             $meta_value = $meta_obj->value;
 
-            // Convert _linked_eval_board Identifier to newly registered CPT Post ID
+            // Updated: Convert Unique Code identifier to newly registered EB CPT Post ID
             if ($meta_key === '_linked_eval_board') {
                 $val = trim($meta_value);
                 if (! empty($val)) {
-                    $board_post = get_post($val);
-                    if ($board_post && $board_post->post_type === 'evaluation-board') {
-                        // Found perfectly by ID natively
-                        $product->update_meta_data('_linked_eval_board', $board_post->ID);
+                    $board_posts = get_posts([
+                        'post_type'   => 'evaluation-board',
+                        'meta_key'    => '_unique_code',
+                        'meta_value'  => $val,
+                        'numberposts' => 1,
+                        'post_status' => 'any'
+                    ]);
+
+                    if (! empty($board_posts)) {
+                        $product->update_meta_data('_linked_eval_board', $board_posts[0]->ID);
                     } else {
-                        // Fallback lookup: Search by title because custom CPTs don't use WooCommerce SKUs
                         $board_by_title = get_page_by_title($val, OBJECT, 'evaluation-board');
                         if ($board_by_title) {
                             $product->update_meta_data('_linked_eval_board', $board_by_title->ID);
@@ -587,7 +792,6 @@ class Silvertell_Woocommerce_Customisation
                 continue;
             }
 
-            // Extract Document Categories
             if (preg_match('/^_document_category_(\d+)$/', $meta_key, $matches)) {
                 $has_doc_updates = true;
                 $incoming_docs[$matches[1]]['category'] = $meta_value;
@@ -595,7 +799,6 @@ class Silvertell_Woocommerce_Customisation
                 continue;
             }
 
-            // Extract Document Files
             if (preg_match('/^_document_file_(\d+)$/', $meta_key, $matches)) {
                 $has_doc_updates = true;
                 $index = $matches[1];
@@ -609,7 +812,6 @@ class Silvertell_Woocommerce_Customisation
                 continue;
             }
 
-            // Extract Document Names
             if (preg_match('/^_document_name_(\d+)$/', $meta_key, $matches)) {
                 $has_doc_updates = true;
                 $index = $matches[1];
@@ -618,7 +820,6 @@ class Silvertell_Woocommerce_Customisation
                 continue;
             }
 
-            // Extract Feature strings
             if (preg_match('/^_(?:feature|featured)_(\d+)$/', $meta_key, $matches)) {
                 $has_feature_updates = true;
                 $index = $matches[1];
@@ -627,7 +828,6 @@ class Silvertell_Woocommerce_Customisation
                 continue;
             }
 
-            // Handle Explicit Custom Keys & Gallery Images
             $is_explicit    = in_array($meta_key, $explicit_keys);
             $is_gallery_img = preg_match('/^_gallery_image_\d+$/', $meta_key);
 
@@ -642,7 +842,6 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
-        // Rebuild Arrays and Deploy Document CPTs
         if ($has_doc_updates) {
             ksort($incoming_docs);
             $linked_doc_ids = [];
@@ -740,7 +939,6 @@ class Silvertell_Woocommerce_Customisation
     public function inject_repeater_assets()
     {
         $screen = get_current_screen();
-        // Allowed injection on the new Evaluation Board CPT as well in case you decide to add meta boxes to it later
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
         <style>

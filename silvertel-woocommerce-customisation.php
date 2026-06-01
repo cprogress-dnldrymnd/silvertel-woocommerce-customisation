@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, and SKU-to-ID translations.
- * Version: 2.16.0
+ * Version: 2.17.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -28,6 +28,9 @@ class Silvertell_Woocommerce_Customisation
 
     private function register_hooks()
     {
+        // Core CPT Registrations
+        add_action('init', [$this, 'register_evaluation_board_cpt']);
+
         // Core Importer Logic
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
         add_filter('woocommerce_product_import_batch_size', [$this, 'reduce_import_batch_size']);
@@ -49,6 +52,44 @@ class Silvertell_Woocommerce_Customisation
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_core_assets']);
+    }
+
+    public function register_evaluation_board_cpt()
+    {
+        $labels = [
+            'name'                  => _x('Evaluation Boards', 'Post Type General Name', 'silvertell-wc-customisation'),
+            'singular_name'         => _x('Evaluation Board', 'Post Type Singular Name', 'silvertell-wc-customisation'),
+            'menu_name'             => __('Evaluation Boards', 'silvertell-wc-customisation'),
+            'all_items'             => __('All Evaluation Boards', 'silvertell-wc-customisation'),
+            'add_new_item'          => __('Add New Evaluation Board', 'silvertell-wc-customisation'),
+            'add_new'               => __('Add New', 'silvertell-wc-customisation'),
+            'new_item'              => __('New Evaluation Board', 'silvertell-wc-customisation'),
+            'edit_item'             => __('Edit Evaluation Board', 'silvertell-wc-customisation'),
+            'update_item'           => __('Update Evaluation Board', 'silvertell-wc-customisation'),
+            'view_item'             => __('View Evaluation Board', 'silvertell-wc-customisation'),
+            'search_items'          => __('Search Evaluation Boards', 'silvertell-wc-customisation'),
+        ];
+        
+        $args = [
+            'label'                 => __('Evaluation Board', 'silvertell-wc-customisation'),
+            'labels'                => $labels,
+            'supports'              => ['title', 'editor', 'thumbnail', 'custom-fields'],
+            'hierarchical'          => false,
+            'public'                => false, // Disabled frontend single view
+            'show_ui'               => true,
+            'show_in_menu'          => true,
+            'menu_position'         => 5,
+            'menu_icon'             => 'dashicons-media-spreadsheet',
+            'show_in_admin_bar'     => true,
+            'show_in_nav_menus'     => false,
+            'can_export'            => true,
+            'has_archive'           => false,
+            'exclude_from_search'   => true,
+            'publicly_queryable'    => false, // Disabled frontend queries
+            'rewrite'               => false, // No URL rewriting needed
+        ];
+        
+        register_post_type('evaluation-board', $args);
     }
 
     public function reduce_import_batch_size($size)
@@ -113,7 +154,6 @@ class Silvertell_Woocommerce_Customisation
     public function register_settings()
     {
         register_setting('silvertell_file_importer_group', 'silvertell_file_meta_keys');
-        register_setting('silvertell_file_importer_group', 'silvertell_eval_category_slug');
         register_setting('silvertell_file_importer_group', 'silvertell_sample_providers', [$this, 'sanitize_sample_providers']);
     }
 
@@ -151,27 +191,19 @@ class Silvertell_Woocommerce_Customisation
     {
         if (! current_user_can('manage_woocommerce')) return;
         $current_keys = get_option('silvertell_file_meta_keys', '_manual');
-        $eval_slug    = get_option('silvertell_eval_category_slug', 'evaluation-boards');
         $providers    = $this->get_sample_providers();
 ?>
         <div class="wrap dd-panel-wrapper" style="padding:0 !important; max-width: 900px;">
             <h1>WooCommerce Advanced Customisations</h1>
             <form method="post" action="options.php">
                 <?php settings_fields('silvertell_file_importer_group'); ?>
-                <h2 class="title">Importer & Category Logic</h2>
+                <h2 class="title">Importer Logic</h2>
                 <table class="form-table" role="presentation">
                     <tbody>
                         <tr>
                             <th scope="row"><label for="silvertell_file_meta_keys">Target Sideload Meta Keys</label></th>
                             <td>
                                 <input type="text" id="silvertell_file_meta_keys" name="silvertell_file_meta_keys" value="<?php echo esc_attr($current_keys); ?>" class="regular-text" style="width: 100%;">
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row"><label for="silvertell_eval_category_slug">Eval Board Category Slug</label></th>
-                            <td>
-                                <input type="text" id="silvertell_eval_category_slug" name="silvertell_eval_category_slug" value="<?php echo esc_attr($eval_slug); ?>" class="regular-text" style="width: 100%;">
-                                <p class="description">Enter the exact slug of the Evaluation Boards category. If checked, the Features tab and document section will hide automatically.</p>
                             </td>
                         </tr>
                     </tbody>
@@ -257,19 +289,17 @@ class Silvertell_Woocommerce_Customisation
 
         if ($post->post_parent > 0) return;
 
-        $eval_slug   = get_option('silvertell_eval_category_slug', 'evaluation-boards');
-        $eval_boards = wc_get_products([
-            'category' => [$eval_slug],
-            'limit'    => -1,
-            'status'   => 'publish',
-            'return'   => 'objects'
+        // Switched from wc_get_products to standard get_posts for the new CPT
+        $eval_boards = get_posts([
+            'post_type'   => 'evaluation-board',
+            'numberposts' => -1,
+            'post_status' => 'publish'
         ]);
 
         $options = ['' => __('Select an Evaluation Board...', 'silvertell-wc-customisation')];
         if (! empty($eval_boards)) {
             foreach ($eval_boards as $board) {
-                if ($board->get_id() === $post->ID) continue;
-                $options[$board->get_id()] = $board->get_name() . ' (#' . $board->get_id() . ')';
+                $options[$board->ID] = $board->post_title . ' (#' . $board->ID . ')';
             }
         }
 
@@ -448,12 +478,8 @@ class Silvertell_Woocommerce_Customisation
         $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s", $post_id, $wpdb->esc_like($prefix) . '%'));
     }
 
-    /**
-     * Helper to safely map a string hierarchy into valid terms
-     */
     private function assign_hierarchical_terms_to_post($post_id, $category_string)
     {
-        // Automatically determine if the taxonomy was registered with a hyphen or underscore
         $taxonomy = 'product-support-category';
         if (! taxonomy_exists($taxonomy) && taxonomy_exists('product_support_category')) {
             $taxonomy = 'product_support_category';
@@ -463,7 +489,6 @@ class Silvertell_Woocommerce_Customisation
             return;
         }
 
-        // Clean out HTML entities encoded by the CSV exporter (e.g. &amp;)
         $category_string = html_entity_decode($category_string, ENT_QUOTES, 'UTF-8');
         $category_string = str_replace('&amp;', '&', $category_string);
 
@@ -474,7 +499,6 @@ class Silvertell_Woocommerce_Customisation
         foreach ($terms as $term_name) {
             if (empty($term_name)) continue;
 
-            // 1. Try to find the exact term strictly mapped to the parent
             $term_query = get_terms([
                 'taxonomy'   => $taxonomy,
                 'name'       => $term_name,
@@ -486,7 +510,6 @@ class Silvertell_Woocommerce_Customisation
             if (! empty($term_query) && ! is_wp_error($term_query)) {
                 $parent_id = $term_query[0];
             } else {
-                // 2. Try falling back to finding the term regardless of parent (in case it was manually created elsewhere)
                 $term_fallback = get_terms([
                     'taxonomy'   => $taxonomy,
                     'name'       => $term_name,
@@ -497,17 +520,14 @@ class Silvertell_Woocommerce_Customisation
                 if (! empty($term_fallback) && ! is_wp_error($term_fallback)) {
                     $parent_id = $term_fallback[0];
                 } else {
-                    // 3. Term definitively does not exist, safely create it
                     $inserted = wp_insert_term($term_name, $taxonomy, ['parent' => $parent_id]);
 
                     if (! is_wp_error($inserted)) {
                         $parent_id = (int) $inserted['term_id'];
-                        clean_term_cache($parent_id, $taxonomy); // Flush the cache to prevent loop drops
+                        clean_term_cache($parent_id, $taxonomy);
                     } elseif ($inserted->get_error_code() === 'term_exists') {
-                        // Handle extreme WP caching lag by extracting the hidden ID
                         $parent_id = (int) $inserted->get_error_data();
                     } else {
-                        // Completely unrecoverable, try to salvage via the raw function
                         $salvage = term_exists($term_name, $taxonomy);
                         if ($salvage) {
                             $parent_id = (int) (is_array($salvage) ? $salvage['term_id'] : $salvage);
@@ -524,7 +544,6 @@ class Silvertell_Woocommerce_Customisation
         }
 
         if (! empty($assigned_term_ids)) {
-            // Apply all IDs in the tree natively to the post object
             wp_set_object_terms($post_id, array_unique($assigned_term_ids), $taxonomy, false);
         }
     }
@@ -545,17 +564,19 @@ class Silvertell_Woocommerce_Customisation
             $meta_key   = $meta_obj->key;
             $meta_value = $meta_obj->value;
 
-            // Convert _linked_eval_board SKU to Product ID
+            // Convert _linked_eval_board Identifier to newly registered CPT Post ID
             if ($meta_key === '_linked_eval_board') {
                 $val = trim($meta_value);
                 if (! empty($val)) {
-                    $board_product = wc_get_product($val);
-                    if ($board_product) {
-                        $product->update_meta_data('_linked_eval_board', $board_product->get_id());
+                    $board_post = get_post($val);
+                    if ($board_post && $board_post->post_type === 'evaluation-board') {
+                        // Found perfectly by ID natively
+                        $product->update_meta_data('_linked_eval_board', $board_post->ID);
                     } else {
-                        $board_id = wc_get_product_id_by_sku($val);
-                        if ($board_id) {
-                            $product->update_meta_data('_linked_eval_board', $board_id);
+                        // Fallback lookup: Search by title because custom CPTs don't use WooCommerce SKUs
+                        $board_by_title = get_page_by_title($val, OBJECT, 'evaluation-board');
+                        if ($board_by_title) {
+                            $product->update_meta_data('_linked_eval_board', $board_by_title->ID);
                         } else {
                             $product->delete_meta_data('_linked_eval_board');
                         }
@@ -633,9 +654,7 @@ class Silvertell_Woocommerce_Customisation
 
                 if (! empty($name) || ! empty($file)) {
 
-                    // --- CPT GENERATION LOGIC ---
                     if (! empty($name)) {
-                        // Check if post exists to avoid duplicates on re-import
                         $existing_cpt = get_posts([
                             'post_type'      => 'product-support',
                             'title'          => $name,
@@ -658,20 +677,16 @@ class Silvertell_Woocommerce_Customisation
                         if ($support_post_id && ! is_wp_error($support_post_id)) {
                             if ($file) update_post_meta($support_post_id, 'pdf_file', $file);
 
-                            // Fire the robust hierarchical engine
                             if (! empty($cat_string)) {
                                 $this->assign_hierarchical_terms_to_post($support_post_id, $cat_string);
                             }
 
-                            // Collect the ID for linking to the product
                             $linked_doc_ids[] = $support_post_id;
                         }
                     }
-                    // --- END CPT GENERATION ---
                 }
             }
 
-            // Append the generated CPT IDs to the product's linked documents list
             if (! empty($linked_doc_ids)) {
                 $existing_linked = $product->get_meta('_linked_documents');
                 if (! is_array($existing_linked)) $existing_linked = [];
@@ -680,7 +695,6 @@ class Silvertell_Woocommerce_Customisation
                 $product->update_meta_data('_linked_documents', $merged);
             }
 
-            // Clean out legacy array key if it exists
             $product->delete_meta_data('_documents');
         }
 
@@ -726,186 +740,35 @@ class Silvertell_Woocommerce_Customisation
     public function inject_repeater_assets()
     {
         $screen = get_current_screen();
-        if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'woocommerce_page_silvertell-file-importer'], true)) return;
-
-        $target_ids = [];
-        if ($screen->id === 'product') {
-            $eval_slug = get_option('silvertell_eval_category_slug', 'evaluation-boards');
-            $eval_cat  = get_term_by('slug', $eval_slug, 'product_cat');
-            if ($eval_cat) {
-                $target_ids[] = (int) $eval_cat->term_id;
-                $children = get_term_children($eval_cat->term_id, 'product_cat');
-                if (! is_wp_error($children)) {
-                    $target_ids = array_merge($target_ids, wp_parse_id_list($children));
-                }
-            }
-        }
+        // Allowed injection on the new Evaluation Board CPT as well in case you decide to add meta boxes to it later
+        if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
         <style>
-            .dd-panel-wrapper {
-                padding: 10px 20px 20px !important;
-            }
-
-            .dd-repeater-header-title {
-                margin-bottom: 15px;
-                font-size: 14px;
-                color: #2271b1;
-            }
-
-            .dd-repeater-container {
-                margin-bottom: 15px;
-            }
-
-            .dd-repeater-row {
-                border: 1px solid #c3c4c7;
-                background: #fff;
-                margin-bottom: 10px;
-                border-radius: 4px;
-                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
-            }
-
-            .dd-repeater-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px 15px;
-                background: #f6f7f7;
-                border-bottom: 1px solid #c3c4c7;
-                cursor: pointer;
-                border-radius: 4px 4px 0 0;
-            }
-
-            .dd-header-left {
-                display: flex;
-                align-items: center;
-                flex: 1;
-            }
-
-            .dd-drag-handle {
-                cursor: grab;
-                color: #8c8f94;
-                margin-right: 12px;
-            }
-
-            .dd-row-title {
-                font-weight: 600;
-                color: #1d2327;
-            }
-
-            .dd-header-right {
-                display: flex;
-                gap: 8px;
-            }
-
-            .dd-repeater-actions span {
-                color: #8c8f94;
-                transition: color 0.15s ease-in-out;
-            }
-
-            .dd-repeater-actions span:hover {
-                color: #2271b1;
-            }
-
-            .dd-repeater-actions .dd-delete-row:hover {
-                color: #d63638;
-            }
-
-            .dd-repeater-content {
-                padding: 15px 20px;
-                display: none;
-                background: #fcfcfc;
-            }
-
-            .dd-field-group {
-                margin-bottom: 15px;
-                display: block;
-                clear: both;
-            }
-
-            .dd-field-group:last-child {
-                margin-bottom: 0;
-            }
-
-            .dd-field-group label {
-                display: block !important;
-                float: none !important;
-                width: auto !important;
-                font-weight: 600;
-                margin-bottom: 6px;
-                color: #50575e;
-            }
-
-            .dd-field-group input[type="text"],
-            .dd-field-group textarea {
-                display: block;
-                width: 100% !important;
-                border: 1px solid #8c8f94;
-                padding: 6px 8px;
-                border-radius: 3px;
-                background: #fff;
-                box-sizing: border-box;
-            }
-
-            .dd-file-wrap {
-                display: flex;
-                gap: 10px;
-                align-items: center;
-                width: 100%;
-            }
-
-            .dd-file-wrap button {
-                white-space: nowrap;
-            }
-
-            .dd-file-display {
-                font-weight: 500;
-                color: #2271b1;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                max-width: 300px;
-            }
-
-            .dd-repeater-footer {
-                padding-top: 5px;
-            }
-
-            .dd-template {
-                display: none !important;
-            }
+            .dd-panel-wrapper { padding: 10px 20px 20px !important; }
+            .dd-repeater-header-title { margin-bottom: 15px; font-size: 14px; color: #2271b1; }
+            .dd-repeater-container { margin-bottom: 15px; }
+            .dd-repeater-row { border: 1px solid #c3c4c7; background: #fff; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04); }
+            .dd-repeater-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #f6f7f7; border-bottom: 1px solid #c3c4c7; cursor: pointer; border-radius: 4px 4px 0 0; }
+            .dd-header-left { display: flex; align-items: center; flex: 1; }
+            .dd-drag-handle { cursor: grab; color: #8c8f94; margin-right: 12px; }
+            .dd-row-title { font-weight: 600; color: #1d2327; }
+            .dd-header-right { display: flex; gap: 8px; }
+            .dd-repeater-actions span { color: #8c8f94; transition: color 0.15s ease-in-out; }
+            .dd-repeater-actions span:hover { color: #2271b1; }
+            .dd-repeater-actions .dd-delete-row:hover { color: #d63638; }
+            .dd-repeater-content { padding: 15px 20px; display: none; background: #fcfcfc; }
+            .dd-field-group { margin-bottom: 15px; display: block; clear: both; }
+            .dd-field-group:last-child { margin-bottom: 0; }
+            .dd-field-group label { display: block !important; float: none !important; width: auto !important; font-weight: 600; margin-bottom: 6px; color: #50575e; }
+            .dd-field-group input[type="text"], .dd-field-group textarea { display: block; width: 100% !important; border: 1px solid #8c8f94; padding: 6px 8px; border-radius: 3px; background: #fff; box-sizing: border-box; }
+            .dd-file-wrap { display: flex; gap: 10px; align-items: center; width: 100%; }
+            .dd-file-wrap button { white-space: nowrap; }
+            .dd-file-display { font-weight: 500; color: #2271b1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+            .dd-repeater-footer { padding-top: 5px; }
+            .dd-template { display: none !important; }
         </style>
         <script>
             jQuery(document).ready(function($) {
-
-                // --- DYNAMIC CONDITIONAL UI LOGIC ---
-                if ($('#taxonomy-product_cat').length > 0) {
-                    var ddEvalCategoryIds = <?php echo wp_json_encode($target_ids); ?>;
-
-                    function ddToggleConditionalTabs() {
-                        if (!ddEvalCategoryIds || ddEvalCategoryIds.length === 0) return;
-
-                        var isEval = false;
-                        $('#taxonomy-product_cat input[type="checkbox"]:checked').each(function() {
-                            if (ddEvalCategoryIds.includes(parseInt($(this).val(), 10))) {
-                                isEval = true;
-                            }
-                        });
-
-                        if (isEval) {
-                            $('.dd-tab-feats').hide();
-                            $('.dd-additional-documents-wrapper').hide();
-                            if ($('.dd-tab-feats').hasClass('active')) {
-                                $('.dd-tab-docs a').trigger('click');
-                            }
-                        } else {
-                            $('.dd-tab-feats').show();
-                            $('.dd-additional-documents-wrapper').show();
-                        }
-                    }
-
-                    ddToggleConditionalTabs();
-                    $('#taxonomy-product_cat').on('change', 'input[type="checkbox"]', ddToggleConditionalTabs);
-                }
 
                 // --- REPEATER LOGIC ---
                 $(document).off('click.ddRepeater');

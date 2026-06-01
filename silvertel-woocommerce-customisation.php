@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Evaluation Board management.
- * Version: 2.19.0
+ * Version: 2.19.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -74,7 +74,7 @@ class Silvertell_Woocommerce_Customisation
             'view_item'             => __('View Evaluation Board', 'silvertell-wc-customisation'),
             'search_items'          => __('Search Evaluation Boards', 'silvertell-wc-customisation'),
         ];
-        
+
         $args = [
             'label'                 => __('Evaluation Board', 'silvertell-wc-customisation'),
             'labels'                => $labels,
@@ -93,7 +93,7 @@ class Silvertell_Woocommerce_Customisation
             'publicly_queryable'    => false,
             'rewrite'               => false,
         ];
-        
+
         register_post_type('evaluation-board', $args);
 
         register_taxonomy('evaluation-board-category', ['evaluation-board'], [
@@ -179,22 +179,22 @@ class Silvertell_Woocommerce_Customisation
     public function render_eb_meta_box($post)
     {
         wp_nonce_field('silvertell_save_eb_meta', 'silvertell_eb_meta_nonce');
-        
+
         echo '<div class="dd-panel-wrapper" style="padding: 10px 0 !important;">';
-        
+
         echo '<div class="dd-field-group">';
         echo '<label style="display:block; font-weight:600; margin-bottom:10px;">Unique Code</label>';
         $ucode = get_post_meta($post->ID, '_unique_code', true);
         echo '<input type="text" name="_unique_code" value="' . esc_attr($ucode) . '" style="max-width:400px; width:100%;" />';
         echo '<p class="description">Used as the primary identifier during importing.</p>';
         echo '</div><hr style="margin:20px 0;"/>';
-        
+
         echo '<h3 style="margin-top:0;">Document Configuration</h3>';
         $this->render_single_file_upload_field('_manual', __('Manual File', 'silvertell-wc-customisation'), 'Upload the main evaluation board manual.', '_manual', $post->ID);
 
         echo '<hr style="margin:20px 0;"/>';
         echo '<h3 style="margin-top:0;">Buy Samples</h3>';
-        
+
         $providers = $this->get_sample_providers();
         if (!empty($providers)) {
             foreach ($providers as $provider) {
@@ -315,13 +315,18 @@ class Silvertell_Woocommerce_Customisation
 
     public function render_eb_importer_on_list_view()
     {
+        // Fail-safe to ensure function is fully loaded before referencing
+        if (!function_exists('get_current_screen')) {
+            return;
+        }
+
         $screen = get_current_screen();
         if (!$screen || $screen->id !== 'edit-evaluation-board') return;
 
         if (!empty($this->import_status_notice)) {
-            echo $this->import_status_notice;
+            echo wp_kses_post($this->import_status_notice);
         }
-        ?>
+    ?>
         <div class="wrap" style="background:#fff; border:1px solid #c3c4c7; padding:15px 20px; margin-top:20px; margin-bottom:-10px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04); max-width:100%;">
             <h2 style="margin-top:0; font-size:16px; font-weight:600; color:#1d2327;">Evaluation Board CSV Importer</h2>
             <p class="description" style="margin:4px 0 15px 0;">Upload your <code>eb.csv</code> configuration file here to build categories, map parent structures recursively, pull media files, and update evaluation board fields.</p>
@@ -331,20 +336,33 @@ class Silvertell_Woocommerce_Customisation
                 <?php submit_button('Import Evaluation Boards', 'secondary', 'import_eb_submit', false, ['style' => 'margin:0;']); ?>
             </form>
         </div>
-        <?php
+    <?php
     }
 
     public function process_evaluation_board_import()
     {
-        if (!isset($_POST['import_eb_submit']) || !isset($_FILES['eb_csv_file'])) return;
+        if (!isset($_POST['import_eb_submit'])) return;
         if (!isset($_POST['silvertell_import_eb_nonce']) || !wp_verify_nonce($_POST['silvertell_import_eb_nonce'], 'silvertell_import_eb')) return;
         if (!current_user_can('manage_woocommerce')) return;
+
+        // Fail-safe for empty/oversized file errors
+        if (empty($_FILES['eb_csv_file']['tmp_name'])) {
+            $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: No file selected or file exceeds maximum server upload size.</p></div>';
+            return;
+        }
 
         $file = $_FILES['eb_csv_file']['tmp_name'];
         if (($handle = fopen($file, "r")) !== FALSE) {
             $headers = fgetcsv($handle, 1000, ",");
-            $headers[0] = trim($headers[0], "\xEF\xBB\xBF"); 
-            
+
+            // Protect against perfectly blank CSVs
+            if (!$headers || !isset($headers[0])) {
+                fclose($handle);
+                $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: The CSV file is blank or improperly formatted.</p></div>';
+                return;
+            }
+
+            $headers[0] = trim($headers[0], "\xEF\xBB\xBF");
             $delayed_parents = [];
 
             while (($data = fgetcsv($handle, 5000, ",")) !== FALSE) {
@@ -362,6 +380,7 @@ class Silvertell_Woocommerce_Customisation
                     $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1, 'post_status' => 'any']);
                     if (!empty($existing)) $existing_id = $existing[0];
                 }
+
                 if (!$existing_id) {
                     $existing = get_posts(['post_type' => 'evaluation-board', 'title' => $name, 'post_status' => 'any', 'fields' => 'ids', 'numberposts' => 1]);
                     if (!empty($existing)) $existing_id = $existing[0];
@@ -424,9 +443,9 @@ class Silvertell_Woocommerce_Customisation
             if (!empty($delayed_parents)) {
                 foreach ($delayed_parents as $child_id => $parent_code) {
                     $parent_query = get_posts([
-                        'post_type'   => 'evaluation-board', 
-                        'meta_key'    => '_unique_code', 
-                        'meta_value'  => $parent_code, 
+                        'post_type'   => 'evaluation-board',
+                        'meta_key'    => '_unique_code',
+                        'meta_value'  => $parent_code,
                         'fields'      => 'ids',
                         'numberposts' => 1,
                         'post_status' => 'any'
@@ -454,7 +473,8 @@ class Silvertell_Woocommerce_Customisation
     {
         global $post;
 
-        if ($post->post_parent > 0) return;
+        // Fail-safe: Restrict to valid WP_Post objects to prevent property-on-null errors
+        if (empty($post) || !is_object($post) || $post->post_parent > 0) return;
 
         $eval_boards = get_posts([
             'post_type'   => 'evaluation-board',
@@ -738,9 +758,16 @@ class Silvertell_Woocommerce_Customisation
                     if (! empty($board_posts)) {
                         $product->update_meta_data('_linked_eval_board', $board_posts[0]->ID);
                     } else {
-                        $board_by_title = get_page_by_title($val, OBJECT, 'evaluation-board');
-                        if ($board_by_title) {
-                            $product->update_meta_data('_linked_eval_board', $board_by_title->ID);
+                        // Fail-safe: Removed deprecated get_page_by_title entirely
+                        $board_by_title = get_posts([
+                            'post_type'   => 'evaluation-board',
+                            'title'       => $val,
+                            'numberposts' => 1,
+                            'post_status' => 'any',
+                            'fields'      => 'ids'
+                        ]);
+                        if (!empty($board_by_title)) {
+                            $product->update_meta_data('_linked_eval_board', $board_by_title[0]);
                         } else {
                             $product->delete_meta_data('_linked_eval_board');
                         }
@@ -901,28 +928,137 @@ class Silvertell_Woocommerce_Customisation
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
         <style>
-            .dd-panel-wrapper { padding: 10px 20px 20px !important; }
-            .dd-repeater-header-title { margin-bottom: 15px; font-size: 14px; color: #2271b1; }
-            .dd-repeater-container { margin-bottom: 15px; }
-            .dd-repeater-row { border: 1px solid #c3c4c7; background: #fff; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04); }
-            .dd-repeater-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #f6f7f7; border-bottom: 1px solid #c3c4c7; cursor: pointer; border-radius: 4px 4px 0 0; }
-            .dd-header-left { display: flex; align-items: center; flex: 1; }
-            .dd-drag-handle { cursor: grab; color: #8c8f94; margin-right: 12px; }
-            .dd-row-title { font-weight: 600; color: #1d2327; }
-            .dd-header-right { display: flex; gap: 8px; }
-            .dd-repeater-actions span { color: #8c8f94; transition: color 0.15s ease-in-out; }
-            .dd-repeater-actions span:hover { color: #2271b1; }
-            .dd-repeater-actions .dd-delete-row:hover { color: #d63638; }
-            .dd-repeater-content { padding: 15px 20px; display: none; background: #fcfcfc; }
-            .dd-field-group { margin-bottom: 15px; display: block; clear: both; }
-            .dd-field-group:last-child { margin-bottom: 0; }
-            .dd-field-group label { display: block !important; float: none !important; width: auto !important; font-weight: 600; margin-bottom: 6px; color: #50575e; }
-            .dd-field-group input[type="text"], .dd-field-group textarea { display: block; width: 100% !important; border: 1px solid #8c8f94; padding: 6px 8px; border-radius: 3px; background: #fff; box-sizing: border-box; }
-            .dd-file-wrap { display: flex; gap: 10px; align-items: center; width: 100%; }
-            .dd-file-wrap button { white-space: nowrap; }
-            .dd-file-display { font-weight: 500; color: #2271b1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
-            .dd-repeater-footer { padding-top: 5px; }
-            .dd-template { display: none !important; }
+            .dd-panel-wrapper {
+                padding: 10px 20px 20px !important;
+            }
+
+            .dd-repeater-header-title {
+                margin-bottom: 15px;
+                font-size: 14px;
+                color: #2271b1;
+            }
+
+            .dd-repeater-container {
+                margin-bottom: 15px;
+            }
+
+            .dd-repeater-row {
+                border: 1px solid #c3c4c7;
+                background: #fff;
+                margin-bottom: 10px;
+                border-radius: 4px;
+                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+            }
+
+            .dd-repeater-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 15px;
+                background: #f6f7f7;
+                border-bottom: 1px solid #c3c4c7;
+                cursor: pointer;
+                border-radius: 4px 4px 0 0;
+            }
+
+            .dd-header-left {
+                display: flex;
+                align-items: center;
+                flex: 1;
+            }
+
+            .dd-drag-handle {
+                cursor: grab;
+                color: #8c8f94;
+                margin-right: 12px;
+            }
+
+            .dd-row-title {
+                font-weight: 600;
+                color: #1d2327;
+            }
+
+            .dd-header-right {
+                display: flex;
+                gap: 8px;
+            }
+
+            .dd-repeater-actions span {
+                color: #8c8f94;
+                transition: color 0.15s ease-in-out;
+            }
+
+            .dd-repeater-actions span:hover {
+                color: #2271b1;
+            }
+
+            .dd-repeater-actions .dd-delete-row:hover {
+                color: #d63638;
+            }
+
+            .dd-repeater-content {
+                padding: 15px 20px;
+                display: none;
+                background: #fcfcfc;
+            }
+
+            .dd-field-group {
+                margin-bottom: 15px;
+                display: block;
+                clear: both;
+            }
+
+            .dd-field-group:last-child {
+                margin-bottom: 0;
+            }
+
+            .dd-field-group label {
+                display: block !important;
+                float: none !important;
+                width: auto !important;
+                font-weight: 600;
+                margin-bottom: 6px;
+                color: #50575e;
+            }
+
+            .dd-field-group input[type="text"],
+            .dd-field-group textarea {
+                display: block;
+                width: 100% !important;
+                border: 1px solid #8c8f94;
+                padding: 6px 8px;
+                border-radius: 3px;
+                background: #fff;
+                box-sizing: border-box;
+            }
+
+            .dd-file-wrap {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                width: 100%;
+            }
+
+            .dd-file-wrap button {
+                white-space: nowrap;
+            }
+
+            .dd-file-display {
+                font-weight: 500;
+                color: #2271b1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 300px;
+            }
+
+            .dd-repeater-footer {
+                padding-top: 5px;
+            }
+
+            .dd-template {
+                display: none !important;
+            }
         </style>
         <script>
             jQuery(document).ready(function($) {

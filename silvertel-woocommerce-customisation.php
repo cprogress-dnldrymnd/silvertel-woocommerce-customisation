@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Evaluation Board management.
- * Version: 2.18.0
+ * Version: 2.19.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -18,6 +18,7 @@ if (! defined('ABSPATH')) {
  */
 class Silvertell_Woocommerce_Customisation
 {
+    private $import_status_notice = '';
 
     public function __construct()
     {
@@ -33,6 +34,7 @@ class Silvertell_Woocommerce_Customisation
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
         add_filter('woocommerce_product_import_batch_size', [$this, 'reduce_import_batch_size']);
         add_action('admin_init', [$this, 'process_evaluation_board_import']);
+        add_action('admin_notices', [$this, 'render_eb_importer_on_list_view']);
 
         // Admin Settings
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -115,7 +117,7 @@ class Silvertell_Woocommerce_Customisation
 
     public function enqueue_core_assets($hook)
     {
-        if (in_array($hook, ['post.php', 'post-new.php', 'woocommerce_page_silvertell-file-importer'], true)) {
+        if (in_array($hook, ['post.php', 'post-new.php', 'edit.php', 'woocommerce_page_silvertell-file-importer'], true)) {
             wp_enqueue_script('jquery-ui-sortable');
             wp_enqueue_media();
         }
@@ -307,70 +309,29 @@ class Silvertell_Woocommerce_Customisation
                 </div>
                 <?php submit_button('Save All Settings', 'primary', 'submit', true, ['style' => 'font-size:16px; padding: 5px 30px;']); ?>
             </form>
-
-            <hr style="margin: 40px 0;">
-            <h2 class="title">Evaluation Board Importer</h2>
-            <p class="description">Upload your CSV to import Evaluation Boards natively into the CPT. The system will process Unique Codes, map hierarchy recursively, generate categories, sideload images, and dynamically assign <code>Meta: _*</code> fields (e.g. <code>Meta: _manual</code>, <code>Meta: _farnell_url</code>).</p>
-            <form method="post" enctype="multipart/form-data" action="">
-                <?php wp_nonce_field('silvertell_import_eb', 'silvertell_import_eb_nonce'); ?>
-                <table class="form-table" role="presentation">
-                    <tbody>
-                        <tr>
-                            <th scope="row"><label for="eb_csv_file">Evaluation Board CSV</label></th>
-                            <td>
-                                <input type="file" id="eb_csv_file" name="eb_csv_file" accept=".csv" required>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-                <?php submit_button('Import Evaluation Boards', 'secondary', 'import_eb_submit', false); ?>
-            </form>
         </div>
     <?php
     }
 
-    private function render_settings_provider_row($name = '', $key = '', $logo = '', $is_template = false)
+    public function render_eb_importer_on_list_view()
     {
-        $row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
-        $input_attr = $is_template ? 'disabled="disabled"' : '';
-        $logo_url   = is_numeric($logo) ? wp_get_attachment_image_url($logo, 'thumbnail') : $logo;
-        $logo_disp  = $logo_url ? 'Logo Selected' : 'No Logo';
-    ?>
-        <div class="<?php echo esc_attr($row_class); ?>">
-            <div class="dd-repeater-header">
-                <div class="dd-header-left">
-                    <span class="dashicons dashicons-menu dd-drag-handle"></span>
-                    <span class="dd-row-title"><?php echo $name ? esc_html($name) : 'New Provider'; ?></span>
-                </div>
-                <div class="dd-header-right dd-repeater-actions">
-                    <span class="dashicons dashicons-arrow-down-alt2 dd-collapse-row" title="Toggle"></span>
-                    <span class="dashicons dashicons-admin-page dd-duplicate-row" title="Duplicate"></span>
-                    <span class="dashicons dashicons-trash dd-delete-row" title="Delete"></span>
-                </div>
-            </div>
-            <div class="dd-repeater-content">
-                <div style="display:flex; gap:20px;">
-                    <div class="dd-field-group" style="flex:1;">
-                        <label>Provider Name</label>
-                        <input type="text" name="silvertell_sample_providers[name][]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr($name); ?>" <?php echo $input_attr; ?> placeholder="e.g. Farnell" />
-                    </div>
-                    <div class="dd-field-group" style="flex:1;">
-                        <label>Meta Key</label>
-                        <input type="text" name="silvertell_sample_providers[key][]" class="dd-full-width" value="<?php echo esc_attr($key); ?>" <?php echo $input_attr; ?> placeholder="e.g. _farnel_url" />
-                    </div>
-                </div>
-                <div class="dd-field-group" style="margin-top:15px;">
-                    <label>Provider Logo</label>
-                    <div class="dd-file-wrap">
-                        <input type="hidden" name="silvertell_sample_providers[logo][]" class="dd-file-input" value="<?php echo esc_attr($logo); ?>" <?php echo $input_attr; ?> />
-                        <button type="button" class="button dd-upload-file">Select Image</button>
-                        <span class="dd-file-display"><?php echo esc_html($logo_disp); ?></span>
-                    </div>
-                    <?php if ($logo_url && !$is_template) echo '<div style="margin-top:10px;"><img src="' . esc_url($logo_url) . '" style="max-height:40px; border:1px solid #ddd; padding:3px; border-radius:4px;" /></div>'; ?>
-                </div>
-            </div>
+        $screen = get_current_screen();
+        if (!$screen || $screen->id !== 'edit-evaluation-board') return;
+
+        if (!empty($this->import_status_notice)) {
+            echo $this->import_status_notice;
+        }
+        ?>
+        <div class="wrap" style="background:#fff; border:1px solid #c3c4c7; padding:15px 20px; margin-top:20px; margin-bottom:-10px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04); max-width:100%;">
+            <h2 style="margin-top:0; font-size:16px; font-weight:600; color:#1d2327;">Evaluation Board CSV Importer</h2>
+            <p class="description" style="margin:4px 0 15px 0;">Upload your <code>eb.csv</code> configuration file here to build categories, map parent structures recursively, pull media files, and update evaluation board fields.</p>
+            <form method="post" enctype="multipart/form-data" action="" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+                <?php wp_nonce_field('silvertell_import_eb', 'silvertell_import_eb_nonce'); ?>
+                <input type="file" id="eb_csv_file" name="eb_csv_file" accept=".csv" required style="padding:4px 0;">
+                <?php submit_button('Import Evaluation Boards', 'secondary', 'import_eb_submit', false, ['style' => 'margin:0;']); ?>
+            </form>
         </div>
-    <?php
+        <?php
     }
 
     public function process_evaluation_board_import()
@@ -398,7 +359,7 @@ class Silvertell_Woocommerce_Customisation
 
                 $existing_id = 0;
                 if (!empty($unique_code)) {
-                    $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1]);
+                    $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1, 'post_status' => 'any']);
                     if (!empty($existing)) $existing_id = $existing[0];
                 }
                 if (!$existing_id) {
@@ -467,7 +428,8 @@ class Silvertell_Woocommerce_Customisation
                         'meta_key'    => '_unique_code', 
                         'meta_value'  => $parent_code, 
                         'fields'      => 'ids',
-                        'numberposts' => 1
+                        'numberposts' => 1,
+                        'post_status' => 'any'
                     ]);
                     if (!empty($parent_query)) {
                         wp_update_post(['ID' => $child_id, 'post_parent' => $parent_query[0]]);
@@ -475,9 +437,7 @@ class Silvertell_Woocommerce_Customisation
                 }
             }
 
-            add_action('admin_notices', function() {
-                echo '<div class="notice notice-success is-dismissible"><p>Evaluation Boards successfully imported/updated.</p></div>';
-            });
+            $this->import_status_notice = '<div class="notice notice-success is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Evaluation Boards successfully imported and synchronized.</p></div>';
         }
     }
 
@@ -539,7 +499,7 @@ class Silvertell_Woocommerce_Customisation
         }
         echo '</div>';
 
-        // Tab 2: Documents (Manual field removed per request)
+        // Tab 2: Documents
         echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
         echo '<div class="options_group dd-additional-documents-wrapper" style="padding-top:15px;">';
 
@@ -764,7 +724,6 @@ class Silvertell_Woocommerce_Customisation
             $meta_key   = $meta_obj->key;
             $meta_value = $meta_obj->value;
 
-            // Updated: Convert Unique Code identifier to newly registered EB CPT Post ID
             if ($meta_key === '_linked_eval_board') {
                 $val = trim($meta_value);
                 if (! empty($val)) {

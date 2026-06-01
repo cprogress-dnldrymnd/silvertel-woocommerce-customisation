@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.20.0
+ * Version: 2.21.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -53,7 +53,6 @@ class Silvertell_Woocommerce_Customisation
         // Custom WooCommerce Tabs & Panels
         add_filter('woocommerce_product_data_tabs', [$this, 'add_custom_product_data_tabs']);
         add_action('woocommerce_product_data_panels', [$this, 'render_custom_product_data_panels']);
-        add_action('woocommerce_product_options_related', [$this, 'add_linked_eval_board_field']);
         add_action('woocommerce_process_product_meta', [$this, 'save_custom_product_data']);
 
         // Assets
@@ -152,15 +151,12 @@ class Silvertell_Woocommerce_Customisation
             wp_die('Error: No file selected or file exceeds maximum server upload size.');
         }
 
-        // Move the uploaded file to a temporary location in the uploads directory
         $upload_dir = wp_upload_dir();
         $target_filename = 'eb_import_' . time() . '.csv';
         $target_path = $upload_dir['basedir'] . '/' . $target_filename;
 
         if (move_uploaded_file($file['tmp_name'], $target_path)) {
-            // Clear any lingering parent transients from previous aborted imports
             delete_transient('silvertell_eb_delayed_parents');
-
             wp_redirect(admin_url('edit.php?post_type=evaluation-board&page=silvertell-eb-importer&step=2&file=' . urlencode($target_filename)));
             exit;
         } else {
@@ -211,7 +207,6 @@ class Silvertell_Woocommerce_Customisation
                 return;
             }
 
-            // Calculate total rows for progress bar
             $handle = fopen($filepath, "r");
             $total_rows = 0;
             if ($handle) {
@@ -220,7 +215,7 @@ class Silvertell_Woocommerce_Customisation
                 }
                 fclose($handle);
             }
-            $data_rows = max(0, $total_rows - 1); // Subtract Header
+            $data_rows = max(0, $total_rows - 1); 
 
             if ($data_rows === 0) {
                 echo '<div class="notice notice-error"><p>The uploaded CSV appears to be empty or improperly formatted.</p></div>';
@@ -318,7 +313,6 @@ class Silvertell_Woocommerce_Customisation
                     });
                 }
 
-                // Start immediately
                 setTimeout(runImportChunk, 1000);
             });
             </script>
@@ -333,7 +327,7 @@ class Silvertell_Woocommerce_Customisation
 
         $file_name = sanitize_text_field($_POST['file']);
         $offset = intval($_POST['offset']);
-        $batch_size = 5; // Process 5 rows at a time to prevent timeouts
+        $batch_size = 5; 
 
         $upload_dir = wp_upload_dir();
         $filepath = $upload_dir['basedir'] . '/' . $file_name;
@@ -344,7 +338,6 @@ class Silvertell_Woocommerce_Customisation
         $headers = fgetcsv($handle, 1000, ",");
         $headers[0] = trim($headers[0], "\xEF\xBB\xBF");
 
-        // Skip to offset
         for ($i = 0; $i < $offset; $i++) {
             fgetcsv($handle);
         }
@@ -442,7 +435,6 @@ class Silvertell_Woocommerce_Customisation
 
         fclose($handle);
         
-        // Save delayed parents state across chunks
         set_transient('silvertell_eb_delayed_parents', $delayed_parents, HOUR_IN_SECONDS);
 
         wp_send_json_success([
@@ -476,10 +468,8 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
-        // Clean up transient
         delete_transient('silvertell_eb_delayed_parents');
 
-        // Delete Temporary CSV File securely
         $file_name = sanitize_text_field($_POST['file']);
         if (!empty($file_name)) {
             $upload_dir = wp_upload_dir();
@@ -737,40 +727,8 @@ class Silvertell_Woocommerce_Customisation
         $tabs['buy_samples'] = ['label' => __('Buy Samples', 'silvertell-wc-customisation'), 'target' => 'silvertell_buy_samples_data', 'class' => $all_types, 'priority' => 80];
         $tabs['documents']   = ['label' => __('Documents', 'silvertell-wc-customisation'), 'target' => 'silvertell_documents_data', 'class' => array_merge($all_types, ['dd-tab-docs']), 'priority' => 81];
         $tabs['features']    = ['label' => __('Features', 'silvertell-wc-customisation'), 'target' => 'silvertell_features_data', 'class' => array_merge($all_types, ['dd-tab-feats']), 'priority' => 82];
+        $tabs['eval_boards'] = ['label' => __('Evaluation Boards', 'silvertell-wc-customisation'), 'target' => 'silvertell_eval_boards_data', 'class' => $all_types, 'priority' => 83];
         return $tabs;
-    }
-
-    public function add_linked_eval_board_field()
-    {
-        global $post;
-
-        if (empty($post) || !is_object($post) || $post->post_parent > 0) return;
-
-        $eval_boards = get_posts([
-            'post_type'   => 'evaluation-board',
-            'numberposts' => -1,
-            'post_status' => 'publish'
-        ]);
-
-        $options = ['' => __('Select an Evaluation Board...', 'silvertell-wc-customisation')];
-        if (! empty($eval_boards)) {
-            foreach ($eval_boards as $board) {
-                $code = get_post_meta($board->ID, '_unique_code', true);
-                $label = $board->post_title . ($code ? ' (' . $code . ')' : '');
-                $options[$board->ID] = $label;
-            }
-        }
-
-        echo '<div class="options_group">';
-        woocommerce_wp_select([
-            'id'          => '_linked_eval_board',
-            'label'       => __('Evaluation Board', 'silvertell-wc-customisation'),
-            'options'     => $options,
-            'class'       => 'wc-enhanced-select',
-            'desc_tip'    => true,
-            'description' => __('Select a specific Evaluation Board to link to this product.', 'silvertell-wc-customisation')
-        ]);
-        echo '</div>';
     }
 
     public function render_custom_product_data_panels()
@@ -793,7 +751,6 @@ class Silvertell_Woocommerce_Customisation
         echo '<div id="silvertell_documents_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
         echo '<div class="options_group dd-additional-documents-wrapper" style="padding-top:15px;">';
 
-        // Multi-select Field for Product Support CPTs
         $current_linked_docs = get_post_meta($post->ID, '_linked_documents', true);
         if (! is_array($current_linked_docs)) $current_linked_docs = [];
 
@@ -829,6 +786,38 @@ class Silvertell_Woocommerce_Customisation
         $this->render_feature_row('', true);
         echo '</div>';
         echo '<div class="dd-repeater-footer"><button type="button" class="button button-primary dd-add-row">' . __('Add Feature', 'silvertell-wc-customisation') . '</button></div>';
+        echo '</div></div>';
+
+        // Tab 4: Evaluation Boards
+        echo '<div id="silvertell_eval_boards_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
+        echo '<div class="options_group" style="padding-top:15px;">';
+
+        $current_linked_ebs = get_post_meta($post->ID, '_linked_eval_boards', true);
+        if (! is_array($current_linked_ebs)) {
+            // Fallback for old single value mapping
+            $old_single = get_post_meta($post->ID, '_linked_eval_board', true);
+            $current_linked_ebs = $old_single ? [(int)$old_single] : [];
+        }
+
+        $eval_boards = get_posts([
+            'post_type'   => 'evaluation-board',
+            'numberposts' => -1,
+            'post_status' => 'publish'
+        ]);
+
+        echo '<p class="form-field _linked_eval_boards_field">';
+        echo '<label for="_linked_eval_boards">' . __('Evaluation Boards', 'silvertell-wc-customisation') . '</label>';
+        echo '<select id="_linked_eval_boards" name="_linked_eval_boards[]" class="wc-enhanced-select" multiple="multiple" style="width: 50%;">';
+        foreach ($eval_boards as $board) {
+            $code = get_post_meta($board->ID, '_unique_code', true);
+            $label = $board->post_title . ($code ? ' (' . $code . ')' : '');
+            $selected = in_array($board->ID, $current_linked_ebs) ? 'selected="selected"' : '';
+            echo '<option value="' . esc_attr($board->ID) . '" ' . $selected . '>' . esc_html($label) . '</option>';
+        }
+        echo '</select>';
+        echo wp_kses_post(wc_help_tip(__('Select multiple Evaluation Boards to link to this product.', 'silvertell-wc-customisation')));
+        echo '</p>';
+
         echo '</div></div>';
     }
 
@@ -900,17 +889,20 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
-        // 2. Save Single Meta Fields
-        if (isset($_POST['_linked_eval_board'])) {
-            update_post_meta($post_id, '_linked_eval_board', absint($_POST['_linked_eval_board']));
-        }
-
-        // 3. Save Linked Documents (Multi-select array)
+        // 2. Save Linked Documents (Multi-select array)
         if (isset($_POST['_linked_documents']) && is_array($_POST['_linked_documents'])) {
             $sanitized_ids = array_map('absint', $_POST['_linked_documents']);
             update_post_meta($post_id, '_linked_documents', $sanitized_ids);
         } else {
             update_post_meta($post_id, '_linked_documents', []);
+        }
+
+        // 3. Save Linked Evaluation Boards (Multi-select array)
+        if (isset($_POST['_linked_eval_boards']) && is_array($_POST['_linked_eval_boards'])) {
+            $sanitized_eb_ids = array_map('absint', $_POST['_linked_eval_boards']);
+            update_post_meta($post_id, '_linked_eval_boards', $sanitized_eb_ids);
+        } else {
+            update_post_meta($post_id, '_linked_eval_boards', []);
         }
 
         // 4. Save Features Array
@@ -1014,36 +1006,51 @@ class Silvertell_Woocommerce_Customisation
             $meta_key   = $meta_obj->key;
             $meta_value = $meta_obj->value;
 
-            if ($meta_key === '_linked_eval_board') {
+            // Updated to handle array/multiple boards from CSV (e.g., "Ag9900_EB, Ag210_EB")
+            if ($meta_key === '_linked_eval_board' || $meta_key === '_linked_eval_boards') {
                 $val = trim($meta_value);
                 if (! empty($val)) {
-                    $board_posts = get_posts([
-                        'post_type'   => 'evaluation-board',
-                        'meta_key'    => '_unique_code',
-                        'meta_value'  => $val,
-                        'numberposts' => 1,
-                        'post_status' => 'any'
-                    ]);
+                    $incoming_codes = array_map('trim', explode(',', $val));
+                    $matched_ids = [];
 
-                    if (! empty($board_posts)) {
-                        $product->update_meta_data('_linked_eval_board', $board_posts[0]->ID);
-                    } else {
-                        $board_by_title = get_posts([
+                    foreach ($incoming_codes as $code_or_title) {
+                        if (empty($code_or_title)) continue;
+
+                        $board_posts = get_posts([
                             'post_type'   => 'evaluation-board',
-                            'title'       => $val,
+                            'meta_key'    => '_unique_code',
+                            'meta_value'  => $code_or_title,
                             'numberposts' => 1,
-                            'post_status' => 'any',
-                            'fields'      => 'ids'
+                            'post_status' => 'any'
                         ]);
-                        if (!empty($board_by_title)) {
-                            $product->update_meta_data('_linked_eval_board', $board_by_title[0]);
+
+                        if (! empty($board_posts)) {
+                            $matched_ids[] = $board_posts[0]->ID;
                         } else {
-                            $product->delete_meta_data('_linked_eval_board');
+                            $board_by_title = get_posts([
+                                'post_type'   => 'evaluation-board',
+                                'title'       => $code_or_title,
+                                'numberposts' => 1,
+                                'post_status' => 'any',
+                                'fields'      => 'ids'
+                            ]);
+                            if (!empty($board_by_title)) {
+                                $matched_ids[] = $board_by_title[0];
+                            }
                         }
                     }
+
+                    if (!empty($matched_ids)) {
+                        $product->update_meta_data('_linked_eval_boards', array_unique($matched_ids));
+                    } else {
+                        $product->delete_meta_data('_linked_eval_boards');
+                    }
                 } else {
-                    $product->delete_meta_data('_linked_eval_board');
+                    $product->delete_meta_data('_linked_eval_boards');
                 }
+                
+                // Cleanup legacy key if present to prevent issues
+                $product->delete_meta_data('_linked_eval_board');
                 continue;
             }
 

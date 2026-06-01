@@ -2,8 +2,8 @@
 
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
- * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Evaluation Board management.
- * Version: 2.19.2
+ * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, multi-select document linking, native repeater fields, conditional UI sections, SKU-to-ID translations, and Advanced AJAX Evaluation Board Importer.
+ * Version: 2.20.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -18,8 +18,6 @@ if (! defined('ABSPATH')) {
  */
 class Silvertell_Woocommerce_Customisation
 {
-    private $import_status_notice = '';
-
     public function __construct()
     {
         $this->register_hooks();
@@ -33,8 +31,12 @@ class Silvertell_Woocommerce_Customisation
         // Core Importers & Sideload Logic
         add_filter('woocommerce_product_import_pre_insert_product_object', [$this, 'intercept_meta_for_sideload'], 10, 2);
         add_filter('woocommerce_product_import_batch_size', [$this, 'reduce_import_batch_size']);
-        add_action('admin_init', [$this, 'process_evaluation_board_import']);
-        add_action('admin_notices', [$this, 'render_eb_importer_on_list_view']);
+
+        // Evaluation Board AJAX Importer Hooks
+        add_action('admin_menu', [$this, 'add_eb_importer_submenu']);
+        add_action('admin_init', [$this, 'handle_eb_csv_upload']);
+        add_action('wp_ajax_silvertell_eb_import_chunk', [$this, 'ajax_import_chunk']);
+        add_action('wp_ajax_silvertell_eb_import_hierarchy', [$this, 'ajax_import_hierarchy']);
 
         // Admin Settings
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -74,7 +76,7 @@ class Silvertell_Woocommerce_Customisation
             'view_item'             => __('View Evaluation Board', 'silvertell-wc-customisation'),
             'search_items'          => __('Search Evaluation Boards', 'silvertell-wc-customisation'),
         ];
-
+        
         $args = [
             'label'                 => __('Evaluation Board', 'silvertell-wc-customisation'),
             'labels'                => $labels,
@@ -93,7 +95,7 @@ class Silvertell_Woocommerce_Customisation
             'publicly_queryable'    => false,
             'rewrite'               => false,
         ];
-
+        
         register_post_type('evaluation-board', $args);
 
         register_taxonomy('evaluation-board-category', ['evaluation-board'], [
@@ -122,6 +124,378 @@ class Silvertell_Woocommerce_Customisation
             wp_enqueue_media();
         }
     }
+
+    // ==============================================================================
+    // AJAX EVALUATION BOARD IMPORTER
+    // ==============================================================================
+
+    public function add_eb_importer_submenu()
+    {
+        add_submenu_page(
+            'edit.php?post_type=evaluation-board',
+            'Import Evaluation Boards',
+            'Import CSV',
+            'manage_woocommerce',
+            'silvertell-eb-importer',
+            [$this, 'render_eb_importer_page']
+        );
+    }
+
+    public function handle_eb_csv_upload()
+    {
+        if (!isset($_POST['silvertell_eb_upload_submit']) || !isset($_FILES['eb_csv_file'])) return;
+        if (!isset($_POST['silvertell_import_eb_nonce']) || !wp_verify_nonce($_POST['silvertell_import_eb_nonce'], 'silvertell_import_eb')) return;
+        if (!current_user_can('manage_woocommerce')) return;
+
+        $file = $_FILES['eb_csv_file'];
+        if (empty($file['tmp_name'])) {
+            wp_die('Error: No file selected or file exceeds maximum server upload size.');
+        }
+
+        // Move the uploaded file to a temporary location in the uploads directory
+        $upload_dir = wp_upload_dir();
+        $target_filename = 'eb_import_' . time() . '.csv';
+        $target_path = $upload_dir['basedir'] . '/' . $target_filename;
+
+        if (move_uploaded_file($file['tmp_name'], $target_path)) {
+            // Clear any lingering parent transients from previous aborted imports
+            delete_transient('silvertell_eb_delayed_parents');
+
+            wp_redirect(admin_url('edit.php?post_type=evaluation-board&page=silvertell-eb-importer&step=2&file=' . urlencode($target_filename)));
+            exit;
+        } else {
+            wp_die('Error: Could not move uploaded CSV file to the uploads directory. Check folder permissions.');
+        }
+    }
+
+    public function render_eb_importer_page()
+    {
+        if (!current_user_can('manage_woocommerce')) return;
+
+        $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
+
+        echo '<div class="wrap dd-panel-wrapper" style="max-width:900px; padding: 20px !important;">';
+        echo '<h1 style="margin-bottom:20px;">Evaluation Board CSV Importer</h1>';
+
+        if ($step === 1) {
+            ?>
+            <div style="background:#fff; border:1px solid #c3c4c7; padding:20px 25px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04);">
+                <p style="font-size:14px; margin-bottom:20px;">Upload your <code>eb.csv</code> configuration file below. The importer will run via AJAX, allowing you to track progress live while sideloading images and generating categories.</p>
+                
+                <form method="post" enctype="multipart/form-data" action="">
+                    <?php wp_nonce_field('silvertell_import_eb', 'silvertell_import_eb_nonce'); ?>
+                    <table class="form-table" role="presentation">
+                        <tbody>
+                            <tr>
+                                <th scope="row"><label for="eb_csv_file" style="font-weight:600;">Choose a CSV file</label></th>
+                                <td>
+                                    <input type="file" id="eb_csv_file" name="eb_csv_file" accept=".csv" required style="border: 1px solid #ccc; padding: 5px; width: 100%; max-width: 400px; background: #fafafa;">
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="submit">
+                        <button type="submit" name="silvertell_eb_upload_submit" class="button button-primary button-hero">Continue to Import</button>
+                    </p>
+                </form>
+            </div>
+            <?php
+        } elseif ($step === 2 && !empty($_GET['file'])) {
+            
+            $file_name = sanitize_text_field($_GET['file']);
+            $upload_dir = wp_upload_dir();
+            $filepath = $upload_dir['basedir'] . '/' . $file_name;
+
+            if (!file_exists($filepath)) {
+                echo '<div class="notice notice-error"><p>Temporary file not found. Please try uploading again.</p></div>';
+                return;
+            }
+
+            // Calculate total rows for progress bar
+            $handle = fopen($filepath, "r");
+            $total_rows = 0;
+            if ($handle) {
+                while (fgetcsv($handle) !== FALSE) {
+                    $total_rows++;
+                }
+                fclose($handle);
+            }
+            $data_rows = max(0, $total_rows - 1); // Subtract Header
+
+            if ($data_rows === 0) {
+                echo '<div class="notice notice-error"><p>The uploaded CSV appears to be empty or improperly formatted.</p></div>';
+                return;
+            }
+            ?>
+            
+            <div style="background:#fff; border:1px solid #c3c4c7; padding:20px 25px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04);">
+                <h2 style="margin-top:0;">Importing Data... Please wait.</h2>
+                <p>Do not close this window until the import is complete.</p>
+
+                <div style="background: #f0f0f1; border-radius: 20px; height: 24px; overflow: hidden; margin: 20px 0; width: 100%; position: relative;">
+                    <div id="dd-eb-progress-fill" style="background: #2271b1; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                    <span id="dd-eb-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 24px; font-size: 12px; color: #fff; font-weight: bold; mix-blend-mode: difference;">0%</span>
+                </div>
+
+                <div id="dd-eb-log-box" style="background: #1d2327; color: #a7aaad; font-family: monospace; font-size: 13px; padding: 15px; height: 350px; overflow-y: auto; border-radius: 4px; text-align: left; line-height: 1.6;">
+                    <div>> Initializing import for <?php echo esc_html($data_rows); ?> rows...</div>
+                </div>
+            </div>
+
+            <script>
+            jQuery(document).ready(function($) {
+                var currentOffset = 0;
+                var totalRows = <?php echo $data_rows; ?>;
+                var fileName = '<?php echo esc_js($file_name); ?>';
+                var nonce = '<?php echo wp_create_nonce('silvertell_eb_ajax_import'); ?>';
+
+                function scrollToBottom() {
+                    var logBox = document.getElementById("dd-eb-log-box");
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+
+                function appendLogs(logs) {
+                    if(!logs || logs.length === 0) return;
+                    logs.forEach(function(log) {
+                        $('#dd-eb-log-box').append('<div>> ' + log + '</div>');
+                    });
+                    scrollToBottom();
+                }
+
+                function runImportChunk() {
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'silvertell_eb_import_chunk',
+                            file: fileName,
+                            offset: currentOffset,
+                            _ajax_nonce: nonce
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                currentOffset += response.data.processed;
+                                var percentage = Math.min(100, Math.round((currentOffset / totalRows) * 100));
+                                
+                                $('#dd-eb-progress-fill').css('width', percentage + '%');
+                                $('#dd-eb-progress-text').text(percentage + '%');
+                                appendLogs(response.data.logs);
+
+                                if (currentOffset < totalRows && response.data.processed > 0) {
+                                    runImportChunk(); 
+                                } else {
+                                    appendLogs(["<span style='color:#f1c40f;'>Mapping hierarchical relationships...</span>"]);
+                                    runHierarchyPass();
+                                }
+                            } else {
+                                appendLogs(["<span style='color:#e74c3c;'>Fatal Error: " + response.data + "</span>"]);
+                            }
+                        },
+                        error: function() {
+                            appendLogs(["<span style='color:#e74c3c;'>Server Timeout. The image sideloads may be taking too long.</span>"]);
+                        }
+                    });
+                }
+
+                function runHierarchyPass() {
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'silvertell_eb_import_hierarchy',
+                            file: fileName,
+                            _ajax_nonce: nonce
+                        },
+                        success: function(res) {
+                            if (res.success) {
+                                appendLogs(res.data.logs);
+                                $('#dd-eb-progress-fill').css('background', '#46b450');
+                                appendLogs(["<span style='color:#46b450; font-weight:bold;'>Import Completed Successfully!</span>"]);
+                            } else {
+                                appendLogs(["<span style='color:#e74c3c;'>Hierarchy Error: " + res.data + "</span>"]);
+                            }
+                        }
+                    });
+                }
+
+                // Start immediately
+                setTimeout(runImportChunk, 1000);
+            });
+            </script>
+            <?php
+        }
+        echo '</div>';
+    }
+
+    public function ajax_import_chunk()
+    {
+        check_ajax_referer('silvertell_eb_ajax_import', '_ajax_nonce');
+
+        $file_name = sanitize_text_field($_POST['file']);
+        $offset = intval($_POST['offset']);
+        $batch_size = 5; // Process 5 rows at a time to prevent timeouts
+
+        $upload_dir = wp_upload_dir();
+        $filepath = $upload_dir['basedir'] . '/' . $file_name;
+
+        if (!file_exists($filepath)) wp_send_json_error('Temporary file missing.');
+
+        $handle = fopen($filepath, "r");
+        $headers = fgetcsv($handle, 1000, ",");
+        $headers[0] = trim($headers[0], "\xEF\xBB\xBF");
+
+        // Skip to offset
+        for ($i = 0; $i < $offset; $i++) {
+            fgetcsv($handle);
+        }
+
+        $logs = [];
+        $processed = 0;
+        $delayed_parents = get_transient('silvertell_eb_delayed_parents') ?: [];
+
+        while (($data = fgetcsv($handle, 5000, ",")) !== FALSE) {
+            if ($processed >= $batch_size) break;
+
+            $row = [];
+            foreach ($headers as $index => $key) {
+                $row[trim($key)] = isset($data[$index]) ? trim($data[$index]) : '';
+            }
+
+            $name = $row['Name'] ?? '';
+            $unique_code = $row['Unique Code'] ?? '';
+            
+            if (empty($name)) {
+                $processed++;
+                continue;
+            }
+
+            $existing_id = 0;
+            if (!empty($unique_code)) {
+                $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1, 'post_status' => 'any']);
+                if (!empty($existing)) $existing_id = $existing[0];
+            }
+            if (!$existing_id) {
+                $existing = get_posts(['post_type' => 'evaluation-board', 'title' => $name, 'post_status' => 'any', 'fields' => 'ids', 'numberposts' => 1]);
+                if (!empty($existing)) $existing_id = $existing[0];
+            }
+
+            $post_data = [
+                'post_title'   => $name,
+                'post_content' => $row['Description'] ?? '',
+                'post_status'  => 'publish',
+                'post_type'    => 'evaluation-board',
+            ];
+
+            if ($existing_id) {
+                $post_data['ID'] = $existing_id;
+                $post_id = wp_update_post($post_data);
+                $action_label = "<span style='color:#72aee6;'>Updated</span>";
+            } else {
+                $post_id = wp_insert_post($post_data);
+                $action_label = "<span style='color:#68de7c;'>Created</span>";
+            }
+
+            if ($post_id && !is_wp_error($post_id)) {
+                $logs[] = "{$action_label}: " . esc_html($name) . " (ID: {$post_id})";
+
+                if (!empty($unique_code)) update_post_meta($post_id, '_unique_code', $unique_code);
+
+                foreach ($row as $col_key => $col_val) {
+                    if (strpos($col_key, 'Meta: ') === 0 && !empty($col_val)) {
+                        $meta_key = substr($col_key, 6);
+                        if ($meta_key === '_manual' && filter_var($col_val, FILTER_VALIDATE_URL)) {
+                            $attach_id = $this->sideload_file_to_media_library($col_val, $post_id);
+                            if (!is_wp_error($attach_id)) {
+                                update_post_meta($post_id, $meta_key, $attach_id);
+                            } else {
+                                update_post_meta($post_id, $meta_key, $col_val);
+                            }
+                        } else {
+                            update_post_meta($post_id, $meta_key, $col_val);
+                        }
+                    }
+                }
+
+                if (!empty($row['Categories'])) {
+                    $chains = array_map('trim', explode(',', $row['Categories']));
+                    foreach ($chains as $chain) {
+                        $this->assign_hierarchical_terms_to_post($post_id, $chain, 'evaluation-board-category');
+                    }
+                }
+
+                if (!empty($row['Images']) && filter_var($row['Images'], FILTER_VALIDATE_URL)) {
+                    $attach_id = $this->sideload_file_to_media_library($row['Images'], $post_id);
+                    if (!is_wp_error($attach_id)) {
+                        set_post_thumbnail($post_id, $attach_id);
+                    }
+                }
+
+                if (!empty($row['Parent'])) {
+                    $delayed_parents[$post_id] = $row['Parent'];
+                }
+            } else {
+                $logs[] = "<span style='color:#e74c3c;'>Failed</span>: " . esc_html($name);
+            }
+
+            $processed++;
+        }
+
+        fclose($handle);
+        
+        // Save delayed parents state across chunks
+        set_transient('silvertell_eb_delayed_parents', $delayed_parents, HOUR_IN_SECONDS);
+
+        wp_send_json_success([
+            'processed' => $processed,
+            'logs'      => $logs
+        ]);
+    }
+
+    public function ajax_import_hierarchy()
+    {
+        check_ajax_referer('silvertell_eb_ajax_import', '_ajax_nonce');
+
+        $delayed_parents = get_transient('silvertell_eb_delayed_parents');
+        $logs = [];
+
+        if (!empty($delayed_parents) && is_array($delayed_parents)) {
+            foreach ($delayed_parents as $child_id => $parent_code) {
+                $parent_query = get_posts([
+                    'post_type'   => 'evaluation-board', 
+                    'meta_key'    => '_unique_code', 
+                    'meta_value'  => $parent_code, 
+                    'fields'      => 'ids',
+                    'numberposts' => 1,
+                    'post_status' => 'any'
+                ]);
+                
+                if (!empty($parent_query)) {
+                    wp_update_post(['ID' => $child_id, 'post_parent' => $parent_query[0]]);
+                    $logs[] = "Mapped Parent [<span style='color:#3498db;'>" . esc_html($parent_code) . "</span>] to Child ID {$child_id}";
+                }
+            }
+        }
+
+        // Clean up transient
+        delete_transient('silvertell_eb_delayed_parents');
+
+        // Delete Temporary CSV File securely
+        $file_name = sanitize_text_field($_POST['file']);
+        if (!empty($file_name)) {
+            $upload_dir = wp_upload_dir();
+            $filepath = $upload_dir['basedir'] . '/' . $file_name;
+            if (file_exists($filepath)) {
+                unlink($filepath);
+                $logs[] = "<span style='color:#7f8c8d;'>Temporary CSV file deleted.</span>";
+            }
+        }
+
+        wp_send_json_success(['logs' => $logs]);
+    }
+
+    // ==============================================================================
+    // CORE META BOXES & PANELS
+    // ==============================================================================
 
     public function register_product_support_meta_box()
     {
@@ -179,22 +553,22 @@ class Silvertell_Woocommerce_Customisation
     public function render_eb_meta_box($post)
     {
         wp_nonce_field('silvertell_save_eb_meta', 'silvertell_eb_meta_nonce');
-
+        
         echo '<div class="dd-panel-wrapper" style="padding: 10px 0 !important;">';
-
+        
         echo '<div class="dd-field-group">';
         echo '<label style="display:block; font-weight:600; margin-bottom:10px;">Unique Code</label>';
         $ucode = get_post_meta($post->ID, '_unique_code', true);
         echo '<input type="text" name="_unique_code" value="' . esc_attr($ucode) . '" style="max-width:400px; width:100%;" />';
         echo '<p class="description">Used as the primary identifier during importing.</p>';
         echo '</div><hr style="margin:20px 0;"/>';
-
+        
         echo '<h3 style="margin-top:0;">Document Configuration</h3>';
         $this->render_single_file_upload_field('_manual', __('Manual File', 'silvertell-wc-customisation'), 'Upload the main evaluation board manual.', '_manual', $post->ID);
 
         echo '<hr style="margin:20px 0;"/>';
         echo '<h3 style="margin-top:0;">Buy Samples</h3>';
-
+        
         $providers = $this->get_sample_providers();
         if (!empty($providers)) {
             foreach ($providers as $provider) {
@@ -313,7 +687,6 @@ class Silvertell_Woocommerce_Customisation
     <?php
     }
 
-    // --- MISSING FUNCTION RESTORED HERE ---
     private function render_settings_provider_row($name = '', $key = '', $logo = '', $is_template = false)
     {
         $row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
@@ -356,151 +729,6 @@ class Silvertell_Woocommerce_Customisation
             </div>
         </div>
     <?php
-    }
-    // --- END MISSING FUNCTION ---
-
-    public function render_eb_importer_on_list_view()
-    {
-        if (!function_exists('get_current_screen')) {
-            return;
-        }
-
-        $screen = get_current_screen();
-        if (!$screen || $screen->id !== 'edit-evaluation-board') return;
-
-        if (!empty($this->import_status_notice)) {
-            echo wp_kses_post($this->import_status_notice);
-        }
-    ?>
-        <div class="wrap" style="background:#fff; border:1px solid #c3c4c7; padding:15px 20px; margin-top:20px; margin-bottom:-10px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04); max-width:100%;">
-            <h2 style="margin-top:0; font-size:16px; font-weight:600; color:#1d2327;">Evaluation Board CSV Importer</h2>
-            <p class="description" style="margin:4px 0 15px 0;">Upload your <code>eb.csv</code> configuration file here to build categories, map parent structures recursively, pull media files, and update evaluation board fields.</p>
-            <form method="post" enctype="multipart/form-data" action="" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
-                <?php wp_nonce_field('silvertell_import_eb', 'silvertell_import_eb_nonce'); ?>
-                <input type="file" id="eb_csv_file" name="eb_csv_file" accept=".csv" required style="padding:4px 0;">
-                <?php submit_button('Import Evaluation Boards', 'secondary', 'import_eb_submit', false, ['style' => 'margin:0;']); ?>
-            </form>
-        </div>
-    <?php
-    }
-
-    public function process_evaluation_board_import()
-    {
-        if (!isset($_POST['import_eb_submit'])) return;
-        if (!isset($_POST['silvertell_import_eb_nonce']) || !wp_verify_nonce($_POST['silvertell_import_eb_nonce'], 'silvertell_import_eb')) return;
-        if (!current_user_can('manage_woocommerce')) return;
-
-        if (empty($_FILES['eb_csv_file']['tmp_name'])) {
-            $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: No file selected or file exceeds maximum server upload size.</p></div>';
-            return;
-        }
-
-        $file = $_FILES['eb_csv_file']['tmp_name'];
-        if (($handle = fopen($file, "r")) !== FALSE) {
-            $headers = fgetcsv($handle, 1000, ",");
-
-            if (!$headers || !isset($headers[0])) {
-                fclose($handle);
-                $this->import_status_notice = '<div class="notice notice-error is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Error: The CSV file is blank or improperly formatted.</p></div>';
-                return;
-            }
-
-            $headers[0] = trim($headers[0], "\xEF\xBB\xBF");
-            $delayed_parents = [];
-
-            while (($data = fgetcsv($handle, 5000, ",")) !== FALSE) {
-                $row = [];
-                foreach ($headers as $index => $key) {
-                    $row[trim($key)] = isset($data[$index]) ? trim($data[$index]) : '';
-                }
-
-                $name = $row['Name'] ?? '';
-                $unique_code = $row['Unique Code'] ?? '';
-                if (empty($name)) continue;
-
-                $existing_id = 0;
-                if (!empty($unique_code)) {
-                    $existing = get_posts(['post_type' => 'evaluation-board', 'meta_key' => '_unique_code', 'meta_value' => $unique_code, 'fields' => 'ids', 'numberposts' => 1, 'post_status' => 'any']);
-                    if (!empty($existing)) $existing_id = $existing[0];
-                }
-
-                if (!$existing_id) {
-                    $existing = get_posts(['post_type' => 'evaluation-board', 'title' => $name, 'post_status' => 'any', 'fields' => 'ids', 'numberposts' => 1]);
-                    if (!empty($existing)) $existing_id = $existing[0];
-                }
-
-                $post_data = [
-                    'post_title'   => $name,
-                    'post_content' => $row['Description'] ?? '',
-                    'post_status'  => 'publish',
-                    'post_type'    => 'evaluation-board',
-                ];
-
-                if ($existing_id) {
-                    $post_data['ID'] = $existing_id;
-                    $post_id = wp_update_post($post_data);
-                } else {
-                    $post_id = wp_insert_post($post_data);
-                }
-
-                if ($post_id && !is_wp_error($post_id)) {
-                    if (!empty($unique_code)) update_post_meta($post_id, '_unique_code', $unique_code);
-
-                    foreach ($row as $col_key => $col_val) {
-                        if (strpos($col_key, 'Meta: ') === 0 && !empty($col_val)) {
-                            $meta_key = substr($col_key, 6);
-                            if ($meta_key === '_manual' && filter_var($col_val, FILTER_VALIDATE_URL)) {
-                                $attach_id = $this->sideload_file_to_media_library($col_val, $post_id);
-                                if (!is_wp_error($attach_id)) {
-                                    update_post_meta($post_id, $meta_key, $attach_id);
-                                } else {
-                                    update_post_meta($post_id, $meta_key, $col_val);
-                                }
-                            } else {
-                                update_post_meta($post_id, $meta_key, $col_val);
-                            }
-                        }
-                    }
-
-                    if (!empty($row['Categories'])) {
-                        $chains = array_map('trim', explode(',', $row['Categories']));
-                        foreach ($chains as $chain) {
-                            $this->assign_hierarchical_terms_to_post($post_id, $chain, 'evaluation-board-category');
-                        }
-                    }
-
-                    if (!empty($row['Images']) && filter_var($row['Images'], FILTER_VALIDATE_URL)) {
-                        $attach_id = $this->sideload_file_to_media_library($row['Images'], $post_id);
-                        if (!is_wp_error($attach_id)) {
-                            set_post_thumbnail($post_id, $attach_id);
-                        }
-                    }
-
-                    if (!empty($row['Parent'])) {
-                        $delayed_parents[$post_id] = $row['Parent'];
-                    }
-                }
-            }
-            fclose($handle);
-
-            if (!empty($delayed_parents)) {
-                foreach ($delayed_parents as $child_id => $parent_code) {
-                    $parent_query = get_posts([
-                        'post_type'   => 'evaluation-board',
-                        'meta_key'    => '_unique_code',
-                        'meta_value'  => $parent_code,
-                        'fields'      => 'ids',
-                        'numberposts' => 1,
-                        'post_status' => 'any'
-                    ]);
-                    if (!empty($parent_query)) {
-                        wp_update_post(['ID' => $child_id, 'post_parent' => $parent_query[0]]);
-                    }
-                }
-            }
-
-            $this->import_status_notice = '<div class="notice notice-success is-dismissible" style="margin-top:20px; margin-bottom:0;"><p>Evaluation Boards successfully imported and synchronized.</p></div>';
-        }
     }
 
     public function add_custom_product_data_tabs($tabs)
@@ -969,137 +1197,28 @@ class Silvertell_Woocommerce_Customisation
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
         <style>
-            .dd-panel-wrapper {
-                padding: 10px 20px 20px !important;
-            }
-
-            .dd-repeater-header-title {
-                margin-bottom: 15px;
-                font-size: 14px;
-                color: #2271b1;
-            }
-
-            .dd-repeater-container {
-                margin-bottom: 15px;
-            }
-
-            .dd-repeater-row {
-                border: 1px solid #c3c4c7;
-                background: #fff;
-                margin-bottom: 10px;
-                border-radius: 4px;
-                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
-            }
-
-            .dd-repeater-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px 15px;
-                background: #f6f7f7;
-                border-bottom: 1px solid #c3c4c7;
-                cursor: pointer;
-                border-radius: 4px 4px 0 0;
-            }
-
-            .dd-header-left {
-                display: flex;
-                align-items: center;
-                flex: 1;
-            }
-
-            .dd-drag-handle {
-                cursor: grab;
-                color: #8c8f94;
-                margin-right: 12px;
-            }
-
-            .dd-row-title {
-                font-weight: 600;
-                color: #1d2327;
-            }
-
-            .dd-header-right {
-                display: flex;
-                gap: 8px;
-            }
-
-            .dd-repeater-actions span {
-                color: #8c8f94;
-                transition: color 0.15s ease-in-out;
-            }
-
-            .dd-repeater-actions span:hover {
-                color: #2271b1;
-            }
-
-            .dd-repeater-actions .dd-delete-row:hover {
-                color: #d63638;
-            }
-
-            .dd-repeater-content {
-                padding: 15px 20px;
-                display: none;
-                background: #fcfcfc;
-            }
-
-            .dd-field-group {
-                margin-bottom: 15px;
-                display: block;
-                clear: both;
-            }
-
-            .dd-field-group:last-child {
-                margin-bottom: 0;
-            }
-
-            .dd-field-group label {
-                display: block !important;
-                float: none !important;
-                width: auto !important;
-                font-weight: 600;
-                margin-bottom: 6px;
-                color: #50575e;
-            }
-
-            .dd-field-group input[type="text"],
-            .dd-field-group textarea {
-                display: block;
-                width: 100% !important;
-                border: 1px solid #8c8f94;
-                padding: 6px 8px;
-                border-radius: 3px;
-                background: #fff;
-                box-sizing: border-box;
-            }
-
-            .dd-file-wrap {
-                display: flex;
-                gap: 10px;
-                align-items: center;
-                width: 100%;
-            }
-
-            .dd-file-wrap button {
-                white-space: nowrap;
-            }
-
-            .dd-file-display {
-                font-weight: 500;
-                color: #2271b1;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                max-width: 300px;
-            }
-
-            .dd-repeater-footer {
-                padding-top: 5px;
-            }
-
-            .dd-template {
-                display: none !important;
-            }
+            .dd-panel-wrapper { padding: 10px 20px 20px !important; }
+            .dd-repeater-header-title { margin-bottom: 15px; font-size: 14px; color: #2271b1; }
+            .dd-repeater-container { margin-bottom: 15px; }
+            .dd-repeater-row { border: 1px solid #c3c4c7; background: #fff; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04); }
+            .dd-repeater-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #f6f7f7; border-bottom: 1px solid #c3c4c7; cursor: pointer; border-radius: 4px 4px 0 0; }
+            .dd-header-left { display: flex; align-items: center; flex: 1; }
+            .dd-drag-handle { cursor: grab; color: #8c8f94; margin-right: 12px; }
+            .dd-row-title { font-weight: 600; color: #1d2327; }
+            .dd-header-right { display: flex; gap: 8px; }
+            .dd-repeater-actions span { color: #8c8f94; transition: color 0.15s ease-in-out; }
+            .dd-repeater-actions span:hover { color: #2271b1; }
+            .dd-repeater-actions .dd-delete-row:hover { color: #d63638; }
+            .dd-repeater-content { padding: 15px 20px; display: none; background: #fcfcfc; }
+            .dd-field-group { margin-bottom: 15px; display: block; clear: both; }
+            .dd-field-group:last-child { margin-bottom: 0; }
+            .dd-field-group label { display: block !important; float: none !important; width: auto !important; font-weight: 600; margin-bottom: 6px; color: #50575e; }
+            .dd-field-group input[type="text"], .dd-field-group textarea { display: block; width: 100% !important; border: 1px solid #8c8f94; padding: 6px 8px; border-radius: 3px; background: #fff; box-sizing: border-box; }
+            .dd-file-wrap { display: flex; gap: 10px; align-items: center; width: 100%; }
+            .dd-file-wrap button { white-space: nowrap; }
+            .dd-file-display { font-weight: 500; color: #2271b1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+            .dd-repeater-footer { padding-top: 5px; }
+            .dd-template { display: none !important; }
         </style>
         <script>
             jQuery(document).ready(function($) {

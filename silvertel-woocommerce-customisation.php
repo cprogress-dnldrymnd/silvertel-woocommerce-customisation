@@ -1361,7 +1361,7 @@ class Silvertell_Woocommerce_Customisation
         wp_delete_post($product_id, true);
     }
 
-    /**
+   /**
      * Print the shared popup markup, styles and behaviour once on the product edit screen.
      */
     public function print_child_product_modal()
@@ -1412,12 +1412,20 @@ class Silvertell_Woocommerce_Customisation
             .dd-modal-subfield { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
             .dd-modal-sublabel { width:90px; color:#646970; }
             .dd-child-modal.is-saving .dd-child-modal-box { opacity:.6; pointer-events:none; }
-            .dd-attr-row { display:flex; gap:8px; margin-bottom:8px; align-items:flex-start; }
-            .dd-attr-row .dd-attr-tax { flex:0 0 190px; }
-            .dd-attr-row .dd-attr-name { flex:1; }
-            .dd-attr-row .dd-attr-value { flex:2; }
-            .dd-attr-row .dd-attr-terms { flex:2; min-height:72px; }
-            .dd-attr-row .dd-attr-del { flex:0 0 auto; }
+            .dd-attr-row { border:1px solid #dcdcde; border-radius:4px; padding:10px; margin-bottom:10px; background:#fff; }
+            .dd-attr-head { display:flex; gap:8px; align-items:center; }
+            .dd-attr-head .dd-attr-tax { flex:0 0 200px; }
+            .dd-attr-head .dd-attr-name { flex:1; }
+            .dd-attr-head .dd-attr-del { margin-left:auto; }
+            .dd-attr-body { margin-top:8px; }
+            .dd-attr-body .dd-attr-value { width:100%; }
+            .dd-attr-value-label { display:block; font-weight:600; margin-bottom:4px; }
+            .dd-attr-terms { width:100%; }
+            .dd-attr-term-actions { margin-top:8px; display:flex; gap:8px; }
+            .dd-attr-term-actions .dd-attr-create { margin-left:auto; }
+            
+            /* Ensures selectWoo dropdown and search input stay above the modal */
+            .select2-container { z-index: 100005 !important; }
         </style>
 
         <script>
@@ -1427,69 +1435,183 @@ class Silvertell_Woocommerce_Customisation
                 var $manager = $('.dd-children-manager');
                 var rootParent = $manager.data('parent');
                 var ddAttrTerms = <?php echo wp_json_encode($this->get_attribute_terms_map()); ?>;
+                var wcAddAttrNonce = '<?php echo esc_js(wp_create_nonce('add-attribute')); ?>';
                 var attrIdx = 0;
+                
+                /**
+                 * Dynamically evaluate the select2 instance function.
+                 * This prevents initialization failures if WooCommerce scripts load after our inline script.
+                 */
+                function getS2Fn() {
+                    return $.fn.selectWoo ? 'selectWoo' : ($.fn.select2 ? 'select2' : null);
+                }
 
-                // Toggle a row between global (term picker) and custom (name/value) mode.
+                /**
+                 * Initialize the select2/selectWoo interface on a target selector.
+                 * @param {jQuery} $sel - The jQuery object containing the select element.
+                 */
+                function s2Init($sel) {
+                    var s2fn = getS2Fn();
+                    if (!s2fn) return;
+                    $sel[s2fn]({ 
+                        width: '100%', 
+                        placeholder: $sel.data('placeholder') || ''
+                    });
+                }
+
+                /**
+                 * Safely destroy a select2/selectWoo instance.
+                 * @param {jQuery} $sel - The jQuery object containing the select element.
+                 */
+                function s2Destroy($sel) {
+                    var s2fn = getS2Fn();
+                    if (s2fn && $sel.hasClass('select2-hidden-accessible')) { 
+                        try { $sel[s2fn]('destroy'); } catch (e) {} 
+                    }
+                }
+
+                /**
+                 * Enhance every already-global term picker after a form loads.
+                 */
+                function initAttrRows() {
+                    $modal.find('.dd-attr-row').each(function() {
+                        var $row = $(this);
+                        if ($row.find('.dd-attr-tax').val()) s2Init($row.find('.dd-attr-terms'));
+                    });
+                }
+
+                /**
+                 * Toggle a row between global (term picker) and custom (name/value) mode.
+                 * @param {jQuery} $row - The active repeater row context.
+                 */
                 function syncAttrRow($row) {
                     var tax = $row.find('.dd-attr-tax').val();
                     var $name = $row.find('.dd-attr-name');
                     var $value = $row.find('.dd-attr-value');
+                    var $global = $row.find('.dd-attr-value-global');
                     var $terms = $row.find('.dd-attr-terms');
+                    
+                    s2Destroy($terms);
+                    $terms.empty();
+                    
                     if (tax) {
-                        $name.hide(); $value.hide();
-                        $terms.empty();
                         (ddAttrTerms[tax] || []).forEach(function(o) {
-                            $terms.append($('<option>').val(o.id).text(o.name));
+                            $terms.append(new Option(o.name, o.id, false, false));
                         });
-                        $terms.show();
+                        $name.hide(); $value.hide(); $global.show();
+                        s2Init($terms);
                     } else {
-                        $terms.hide().empty();
+                        $global.hide();
                         $name.show(); $value.show();
                     }
                 }
 
+                /**
+                 * Render and open the specific child product edit modal.
+                 */
                 function openModal(id, parent, title) {
                     $modal.find('.dd-child-modal-title').text(title);
                     $modal.find('.dd-child-modal-msg').text('');
                     $modal.find('.dd-child-modal-body').html('<p>Loading…</p>');
                     $modal.show();
+                    
                     $.post(ajaxurl, { action: 'silvertell_child_form', nonce: nonce, id: id, parent: parent }, function(res) {
                         if (res && res.success) {
                             $modal.find('.dd-child-modal-body').html(res.data.html);
+                            initAttrRows();
                         } else {
                             $modal.find('.dd-child-modal-body').html('<p>Could not load the form.</p>');
                         }
                     });
                 }
+
                 function closeModal() { $modal.hide(); }
 
+                // Setup Listeners
                 $manager.on('click', '.dd-child-edit', function() {
                     openModal($(this).data('id'), 0, '<?php echo esc_js(__('Edit Child Product', 'silvertell-wc-customisation')); ?>');
                 });
+                
                 $manager.on('click', '.dd-child-add', function() {
                     openModal(0, $(this).data('parent'), '<?php echo esc_js(__('Add Child Product', 'silvertell-wc-customisation')); ?>');
                 });
+                
                 $manager.on('click', '.dd-child-delete', function() {
                     if (!confirm('<?php echo esc_js(__('Permanently delete this child product and its sub-items? This cannot be undone.', 'silvertell-wc-customisation')); ?>')) return;
+                    
                     $.post(ajaxurl, { action: 'silvertell_child_delete', nonce: nonce, id: $(this).data('id'), root: rootParent }, function(res) {
                         if (res && res.success) $('.dd-child-list-wrap').html(res.data.list);
                     });
                 });
 
                 $modal.on('click', '.dd-child-modal-close, .dd-child-modal-cancel, .dd-child-modal-overlay', closeModal);
+                
                 $modal.on('click', '.dd-attr-add', function() {
                     var tpl = $('.dd-attr-template').html().replace(/__INDEX__/g, 'new' + (attrIdx++));
                     $(this).closest('.dd-modal-field').find('.dd-attr-rows').append(tpl);
                 });
-                $modal.on('click', '.dd-attr-del', function() { $(this).closest('.dd-attr-row').remove(); });
-                $modal.on('change', '.dd-attr-tax', function() { syncAttrRow($(this).closest('.dd-attr-row')); });
+                
+                $modal.on('click', '.dd-attr-del', function() {
+                    var $row = $(this).closest('.dd-attr-row');
+                    s2Destroy($row.find('.dd-attr-terms'));
+                    $row.remove();
+                });
+                
+                $modal.on('change', '.dd-attr-tax', function() { 
+                    syncAttrRow($(this).closest('.dd-attr-row')); 
+                });
 
+                // Select All UI Action
+                $modal.on('click', '.dd-attr-select-all', function() {
+                    var $t = $(this).closest('.dd-attr-row').find('.dd-attr-terms');
+                    $t.find('option').prop('selected', true);
+                    $t.trigger('change');
+                });
+                
+                // Select None UI Action
+                $modal.on('click', '.dd-attr-select-none', function() {
+                    var $t = $(this).closest('.dd-attr-row').find('.dd-attr-terms');
+                    $t.find('option').prop('selected', false);
+                    $t.trigger('change');
+                });
+                
+                // Create New Term via core WooCommerce AJAX
+                $modal.on('click', '.dd-attr-create', function() {
+                    var $row = $(this).closest('.dd-attr-row');
+                    var tax = $row.find('.dd-attr-tax').val();
+                    if (!tax) return;
+                    
+                    var name = window.prompt('<?php echo esc_js(__('Enter a new value name:', 'silvertell-wc-customisation')); ?>');
+                    if (!name) return;
+                    
+                    var $t = $row.find('.dd-attr-terms');
+                    
+                    $.post(ajaxurl, { 
+                        action: 'woocommerce_add_new_attribute', 
+                        taxonomy: tax, 
+                        term: name, 
+                        security: wcAddAttrNonce 
+                    }, function(res) {
+                        // Native WC AJAX for this endpoint returns flat JSON on success, and wp_send_json_error on failure
+                        if (res && res.term_id) {
+                            $t.append(new Option(res.name, res.term_id, true, true)).trigger('change');
+                            (ddAttrTerms[tax] = ddAttrTerms[tax] || []).push({ id: res.term_id, name: res.name });
+                        } else {
+                            var errorMsg = (res && res.data && res.data.error) ? res.data.error : '<?php echo esc_js(__('Could not create the value.', 'silvertell-wc-customisation')); ?>';
+                            alert(errorMsg);
+                        }
+                    });
+                });
+
+                // Save Child Product Action
                 $modal.on('click', '.dd-child-modal-save', function() {
                     var $btn = $(this);
                     var data = $modal.find('.dd-child-modal-form').serialize();
+                    
                     data += '&action=silvertell_child_save&nonce=' + encodeURIComponent(nonce) + '&root=' + encodeURIComponent(rootParent);
                     $modal.addClass('is-saving');
                     $modal.find('.dd-child-modal-msg').text('');
+                    
                     $.post(ajaxurl, data, function(res) {
                         $modal.removeClass('is-saving');
                         if (res && res.success) {

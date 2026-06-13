@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.31.1
+ * Version: 2.32.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -20,9 +20,6 @@ class Silvertell_Woocommerce_Customisation
 {
     /** @var array Per-request memo of build_product_range() results, keyed by product ID. */
     private $range_cache = [];
-
-    /** @var array Admin products-list depth per product ID, set while rendering the hierarchical list. */
-    private $product_list_depths = [];
 
     public function __construct()
     {
@@ -72,13 +69,18 @@ class Silvertell_Woocommerce_Customisation
         // so they must not be reachable as standalone single pages.
         add_action('template_redirect', [$this, 'redirect_child_product_pages']);
 
-        // Admin Products list: display the post_parent relationship as an indented tree
-        // (like the hierarchical Evaluation Board list) instead of WooCommerce's flat
-        // "← parent" arrow. The reorder groups children under parents; a footer script
-        // adds the em-dash indent (kept out of the stored title so Quick Edit is safe).
-        add_action('pre_get_posts', [$this, 'hierarchical_product_list_query']);
-        add_filter('the_posts', [$this, 'hierarchical_product_list_rows'], 10, 2);
-        add_action('admin_footer-edit.php', [$this, 'print_product_tree_indent']);
+        // Admin Products list: hide child products (sub-range groups / variants). They are
+        // managed inside their parent product's edit screen via the "Child Products" meta
+        // box below, not as standalone rows in the list.
+        add_action('pre_get_posts', [$this, 'hide_child_products_from_list']);
+
+        // Child Products manager on the product edit screen (tree list + add/delete + a
+        // popup editor for Title / Content / Categories / SKU / Attributes / Buy Samples).
+        add_action('add_meta_boxes', [$this, 'register_child_products_meta_box']);
+        add_action('admin_footer', [$this, 'print_child_product_modal']);
+        add_action('wp_ajax_silvertell_child_form', [$this, 'ajax_child_form']);
+        add_action('wp_ajax_silvertell_child_save', [$this, 'ajax_child_save']);
+        add_action('wp_ajax_silvertell_child_delete', [$this, 'ajax_child_delete']);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -925,8 +927,8 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Is the supplied query the main admin Products list, viewed plainly (no search,
-     * filter or custom sort)? Only then do we override it into a hierarchical tree —
-     * any active search/filter/sort should keep WooCommerce's normal flat results.
+     * filter or custom sort)? Only then do we hide child products — when the user is
+     * searching/filtering/sorting we leave the list untouched so children stay findable.
      */
     private function is_plain_product_list_query($query)
     {
@@ -943,107 +945,408 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Show every product on one page, ordered by title, so the reorder pass can group
-     * each parent with its children. We deliberately do NOT filter the query (e.g. by
-     * post_parent) — that previously hid the children entirely — we only reorder.
+     * Hide child products (any product with a post_parent) from the main Products list —
+     * they are managed from inside their parent's edit screen. Searching/filtering still
+     * shows everything so children remain findable.
      */
-    public function hierarchical_product_list_query($query)
+    public function hide_child_products_from_list($query)
     {
         if (! $this->is_plain_product_list_query($query)) return;
 
-        $query->set('orderby', 'title');
-        $query->set('order', 'ASC');
-        $query->set('posts_per_page', -1);
+        $query->set('post_parent', 0);
+    }
+
+    // ==============================================================================
+    // CHILD PRODUCTS MANAGER (parent edit screen + popup editor)
+    // ==============================================================================
+
+    public function register_child_products_meta_box()
+    {
+        add_meta_box(
+            'silvertell_child_products',
+            __('Child Products', 'silvertell-wc-customisation'),
+            [$this, 'render_child_products_meta_box'],
+            'product',
+            'normal',
+            'high'
+        );
+    }
+
+    public function render_child_products_meta_box($post)
+    {
+        wp_nonce_field('silvertell_child_ajax', 'silvertell_child_nonce');
+        echo '<div class="dd-children-manager" data-parent="' . esc_attr($post->ID) . '">';
+        echo '<p class="description" style="margin:0 0 10px;">'
+            . esc_html__('Sub-range groups and variants of this product. Edit them in a popup, or add/remove them here — they will not appear as separate rows in the Products list.', 'silvertell-wc-customisation')
+            . '</p>';
+        echo '<div class="dd-child-list-wrap">' . $this->render_child_products_list($post->ID) . '</div>';
+        echo '<p style="margin-top:12px;"><button type="button" class="button button-primary dd-child-add" data-parent="' . esc_attr($post->ID) . '">'
+            . esc_html__('Add Child Product', 'silvertell-wc-customisation') . '</button></p>';
+        echo '</div>';
     }
 
     /**
-     * Reorder the fetched products into a parent → children tree (depth-first), without
-     * adding or removing any rows, and record each row's depth for the title indent.
-     * Children whose parent isn't in the set stay where they are, so nothing is dropped.
+     * Render the descendant tree of a product as nested rows with edit/add/delete actions.
      */
-    public function hierarchical_product_list_rows($posts, $query)
+    private function render_child_products_list($parent_id, $depth = 0)
     {
-        if (! $this->is_plain_product_list_query($query) || count($posts) < 2) return $posts;
+        $children = get_children([
+            'post_parent' => $parent_id,
+            'post_type'   => 'product',
+            'post_status' => ['publish', 'pending', 'draft', 'future', 'private'],
+            'numberposts' => -1,
+            'orderby'     => 'menu_order title',
+            'order'       => 'ASC',
+        ]);
 
-        // Group posts by their parent ID and note which IDs are present in this set.
-        $children_by_parent = [];
-        $present = [];
-        foreach ($posts as $post) {
-            $children_by_parent[(int) $post->post_parent][] = $post;
-            $present[(int) $post->ID] = true;
+        if (empty($children)) {
+            return $depth === 0 ? '<p class="dd-child-empty">' . esc_html__('No child products yet.', 'silvertell-wc-customisation') . '</p>' : '';
         }
 
-        $this->product_list_depths = [];
-        $ordered  = [];
-        $emitted  = [];
+        $html = $depth === 0 ? '<div class="dd-child-list">' : '';
+        foreach ($children as $child) {
+            $product = wc_get_product($child->ID);
+            $sku     = $product ? $product->get_sku() : '';
+            $status  = $child->post_status !== 'publish' ? ' (' . esc_html($child->post_status) . ')' : '';
 
-        foreach ($posts as $post) {
-            // A "root" is a top-level product, or one whose parent isn't on this list.
-            $parent_id = (int) $post->post_parent;
-            if ($parent_id === 0 || empty($present[$parent_id])) {
-                $this->append_product_branch($post, 0, $children_by_parent, $ordered, $emitted);
-            }
+            $html .= '<div class="dd-child-row" data-id="' . esc_attr($child->ID) . '">';
+            $html .= '<span class="dd-child-name" style="padding-left:' . ($depth * 22) . 'px;">'
+                . ($depth ? '<span class="dd-child-twig">' . str_repeat('— ', $depth) . '</span>' : '')
+                . esc_html($child->post_title) . $status . '</span>';
+            $html .= '<span class="dd-child-sku">' . ($sku !== '' ? esc_html($sku) : '&mdash;') . '</span>';
+            $html .= '<span class="dd-child-actions">';
+            $html .= '<button type="button" class="button dd-child-edit" data-id="' . esc_attr($child->ID) . '">' . esc_html__('Edit', 'silvertell-wc-customisation') . '</button> ';
+            $html .= '<button type="button" class="button dd-child-add" data-parent="' . esc_attr($child->ID) . '">' . esc_html__('Add Child', 'silvertell-wc-customisation') . '</button> ';
+            $html .= '<button type="button" class="button dd-child-delete" data-id="' . esc_attr($child->ID) . '">' . esc_html__('Delete', 'silvertell-wc-customisation') . '</button>';
+            $html .= '</span>';
+            $html .= '</div>';
+
+            $html .= $this->render_child_products_list($child->ID, $depth + 1);
         }
+        if ($depth === 0) $html .= '</div>';
 
-        // Safety net: append anything not yet emitted (e.g. a parent/child cycle).
-        foreach ($posts as $post) {
-            if (empty($emitted[(int) $post->ID])) $ordered[] = $post;
-        }
-
-        return $ordered;
+        return $html;
     }
 
     /**
-     * Append a product then, depth-first, each of its children already present in the set.
+     * AJAX: return the popup form for a child product (id = 0 for a new child).
      */
-    private function append_product_branch($post, $depth, $children_by_parent, &$ordered, &$emitted)
+    public function ajax_child_form()
     {
-        $id = (int) $post->ID;
-        if (! empty($emitted[$id])) return; // guard against cycles
-        $emitted[$id] = true;
+        check_ajax_referer('silvertell_child_ajax', 'nonce');
+        if (! current_user_can('edit_products')) wp_send_json_error(['message' => 'permission']);
 
-        $ordered[] = $post;
-        $this->product_list_depths[$id] = $depth;
-
-        if (! empty($children_by_parent[$id])) {
-            foreach ($children_by_parent[$id] as $child) {
-                $this->append_product_branch($child, $depth + 1, $children_by_parent, $ordered, $emitted);
-            }
+        require_once ABSPATH . 'wp-admin/includes/template.php';
+        if (! class_exists('Walker_Category_Checklist')) {
+            require_once ABSPATH . 'wp-admin/includes/class-walker-category-checklist.php';
         }
+
+        $child_id  = isset($_POST['id']) ? absint($_POST['id']) : 0;
+        $parent_id = isset($_POST['parent']) ? absint($_POST['parent']) : 0;
+        $product   = $child_id ? wc_get_product($child_id) : null;
+
+        $title   = $product ? $product->get_name() : '';
+        $content = $product ? $product->get_description() : '';
+        $sku     = $product ? $product->get_sku() : '';
+
+        ob_start();
+        ?>
+        <input type="hidden" name="child_id" value="<?php echo esc_attr($child_id); ?>">
+        <input type="hidden" name="parent_id" value="<?php echo esc_attr($parent_id); ?>">
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Title', 'silvertell-wc-customisation'); ?></label>
+            <input type="text" name="post_title" class="dd-full-width" value="<?php echo esc_attr($title); ?>">
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Post Content', 'silvertell-wc-customisation'); ?></label>
+            <textarea name="post_content" rows="4" class="dd-full-width"><?php echo esc_textarea($content); ?></textarea>
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('SKU', 'silvertell-wc-customisation'); ?></label>
+            <input type="text" name="_sku" class="dd-full-width" value="<?php echo esc_attr($sku); ?>">
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Product Categories', 'silvertell-wc-customisation'); ?></label>
+            <ul class="dd-cat-checklist">
+                <?php wp_terms_checklist($child_id, ['taxonomy' => 'product_cat']); ?>
+            </ul>
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Attributes', 'silvertell-wc-customisation'); ?></label>
+            <p class="description" style="margin:0 0 8px;"><?php esc_html_e('Name and value (use "|" to separate multiple values).', 'silvertell-wc-customisation'); ?></p>
+            <div class="dd-attr-rows">
+                <?php
+                $rows = [];
+                if ($product) {
+                    foreach ($product->get_attributes() as $key => $attr) {
+                        if (! is_object($attr)) continue;
+                        $rows[] = [
+                            'name'  => $attr->get_name(),
+                            'value' => implode(' | ', $attr->get_options()),
+                        ];
+                    }
+                }
+                foreach ($rows as $row) $this->render_child_attr_row($row['name'], $row['value']);
+                ?>
+            </div>
+            <button type="button" class="button dd-attr-add" style="margin-top:6px;"><?php esc_html_e('Add Attribute', 'silvertell-wc-customisation'); ?></button>
+            <script type="text/template" class="dd-attr-template"><?php $this->render_child_attr_row('', ''); ?></script>
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Buy Samples', 'silvertell-wc-customisation'); ?></label>
+            <?php foreach ($this->get_sample_providers() as $provider) :
+                $val = $child_id ? get_post_meta($child_id, $provider['meta_key'], true) : ''; ?>
+                <div class="dd-modal-subfield">
+                    <span class="dd-modal-sublabel"><?php echo esc_html($provider['name']); ?></span>
+                    <input type="url" name="buy_samples[<?php echo esc_attr($provider['meta_key']); ?>]" class="dd-full-width" value="<?php echo esc_attr($val); ?>">
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php
+        wp_send_json_success(['html' => ob_get_clean()]);
+    }
+
+    private function render_child_attr_row($name, $value)
+    {
+        ?>
+        <div class="dd-attr-row" style="display:flex; gap:8px; margin-bottom:6px;">
+            <input type="text" name="attr_name[]" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>" style="flex:1;">
+            <input type="text" name="attr_value[]" placeholder="<?php esc_attr_e('Value', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>" style="flex:2;">
+            <button type="button" class="button dd-attr-del">&times;</button>
+        </div>
+        <?php
     }
 
     /**
-     * Print a small script that prepends em-dashes to each child product's title in the
-     * list, indenting it by depth — purely visual, so the stored title (and Quick Edit)
-     * is never touched. Uses the depth map built during the reorder pass.
+     * AJAX: create or update a child product from the popup form, then return the
+     * refreshed child list for the root parent.
      */
-    public function print_product_tree_indent()
+    public function ajax_child_save()
     {
-        if (empty($this->product_list_depths)) return;
+        check_ajax_referer('silvertell_child_ajax', 'nonce');
+        if (! current_user_can('edit_products')) wp_send_json_error(['message' => 'permission']);
 
-        $map = [];
-        foreach ($this->product_list_depths as $id => $depth) {
-            if ($depth > 0) $map[$id] = (int) $depth;
+        $child_id  = isset($_POST['child_id']) ? absint($_POST['child_id']) : 0;
+        $parent_id = isset($_POST['parent_id']) ? absint($_POST['parent_id']) : 0;
+        $root      = isset($_POST['root']) ? absint($_POST['root']) : 0;
+
+        $product = $child_id ? wc_get_product($child_id) : new WC_Product_Simple();
+        if (! $product) wp_send_json_error(['message' => 'not_found']);
+
+        $product->set_name(sanitize_text_field(wp_unslash($_POST['post_title'] ?? '')));
+        $product->set_description(wp_kses_post(wp_unslash($_POST['post_content'] ?? '')));
+        $product->set_status('publish');
+
+        if (! $child_id && $parent_id) {
+            $product->set_parent_id($parent_id);
         }
-        if (empty($map)) return;
-?>
+
+        // SKU (guard against duplicates).
+        $sku = sanitize_text_field(wp_unslash($_POST['_sku'] ?? ''));
+        try {
+            $product->set_sku($sku);
+        } catch (Exception $e) {
+            wp_send_json_error(['message' => sprintf(__('SKU "%s" is already in use.', 'silvertell-wc-customisation'), $sku)]);
+        }
+
+        // Categories.
+        $cat_ids = [];
+        if (isset($_POST['tax_input']['product_cat']) && is_array($_POST['tax_input']['product_cat'])) {
+            $cat_ids = array_values(array_filter(array_map('absint', $_POST['tax_input']['product_cat'])));
+        }
+        $product->set_category_ids($cat_ids);
+
+        // Attributes (custom, all visible).
+        $names  = isset($_POST['attr_name']) ? (array) wp_unslash($_POST['attr_name']) : [];
+        $values = isset($_POST['attr_value']) ? (array) wp_unslash($_POST['attr_value']) : [];
+        $attributes = [];
+        foreach ($names as $i => $raw_name) {
+            $name = sanitize_text_field($raw_name);
+            if ($name === '') continue;
+            $raw_val = isset($values[$i]) ? $values[$i] : '';
+            $options = array_values(array_filter(array_map('trim', explode('|', $raw_val)), 'strlen'));
+
+            $attribute = new WC_Product_Attribute();
+            $attribute->set_id(0);
+            $attribute->set_name($name);
+            $attribute->set_options($options);
+            $attribute->set_position(count($attributes));
+            $attribute->set_visible(true);
+            $attribute->set_variation(false);
+            $attributes[] = $attribute;
+        }
+        $product->set_attributes($attributes);
+
+        $saved_id = $product->save();
+        if (! $saved_id) wp_send_json_error(['message' => 'save_failed']);
+
+        // Buy Samples meta.
+        $providers   = $this->get_sample_providers();
+        $valid_keys  = wp_list_pluck($providers, 'meta_key');
+        $buy_samples = isset($_POST['buy_samples']) && is_array($_POST['buy_samples']) ? wp_unslash($_POST['buy_samples']) : [];
+        foreach ($buy_samples as $key => $url) {
+            if (! in_array($key, $valid_keys, true)) continue;
+            update_post_meta($saved_id, $key, sanitize_url($url));
+        }
+
+        if (! $root) $root = $parent_id ?: $saved_id;
+        wp_send_json_success(['list' => $this->render_child_products_list($root)]);
+    }
+
+    /**
+     * AJAX: trash a child product (and its descendants), then return the refreshed list.
+     */
+    public function ajax_child_delete()
+    {
+        check_ajax_referer('silvertell_child_ajax', 'nonce');
+        if (! current_user_can('delete_products')) wp_send_json_error(['message' => 'permission']);
+
+        $child_id = isset($_POST['id']) ? absint($_POST['id']) : 0;
+        $root     = isset($_POST['root']) ? absint($_POST['root']) : 0;
+        if (! $child_id) wp_send_json_error(['message' => 'no_id']);
+
+        $this->trash_product_branch($child_id);
+
+        wp_send_json_success(['list' => $this->render_child_products_list($root)]);
+    }
+
+    /**
+     * Trash a product and all of its descendant products (depth-first) so none are orphaned.
+     */
+    private function trash_product_branch($product_id)
+    {
+        $children = get_children([
+            'post_parent' => $product_id,
+            'post_type'   => 'product',
+            'post_status' => 'any',
+            'numberposts' => -1,
+            'fields'      => 'ids',
+        ]);
+        foreach ($children as $cid) {
+            $this->trash_product_branch($cid);
+        }
+        wp_trash_post($product_id);
+    }
+
+    /**
+     * Print the shared popup markup, styles and behaviour once on the product edit screen.
+     */
+    public function print_child_product_modal()
+    {
+        $screen = get_current_screen();
+        if (! $screen || $screen->post_type !== 'product' || $screen->base !== 'post') return;
+        ?>
+        <div id="dd-child-modal" class="dd-child-modal" style="display:none;">
+            <div class="dd-child-modal-overlay"></div>
+            <div class="dd-child-modal-box">
+                <div class="dd-child-modal-head">
+                    <h2 class="dd-child-modal-title"><?php esc_html_e('Edit Child Product', 'silvertell-wc-customisation'); ?></h2>
+                    <button type="button" class="dd-child-modal-close" aria-label="Close">&times;</button>
+                </div>
+                <form class="dd-child-modal-form"><div class="dd-child-modal-body"></div></form>
+                <div class="dd-child-modal-foot">
+                    <span class="dd-child-modal-msg"></span>
+                    <button type="button" class="button button-primary dd-child-modal-save"><?php esc_html_e('Save', 'silvertell-wc-customisation'); ?></button>
+                    <button type="button" class="button dd-child-modal-cancel"><?php esc_html_e('Cancel', 'silvertell-wc-customisation'); ?></button>
+                </div>
+            </div>
+        </div>
+
+        <style>
+            .dd-child-list-wrap { margin-bottom: 8px; }
+            .dd-child-row { display:flex; align-items:center; gap:12px; padding:8px 6px; border-bottom:1px solid #f0f0f1; }
+            .dd-child-row:hover { background:#f6f7f7; }
+            .dd-child-name { flex:1; font-weight:600; }
+            .dd-child-twig { color:#a0a5aa; font-weight:400; }
+            .dd-child-sku { width:140px; color:#646970; }
+            .dd-child-actions { white-space:nowrap; }
+            .dd-child-empty { color:#646970; font-style:italic; }
+            .dd-child-modal { position:fixed; inset:0; z-index:100000; }
+            .dd-child-modal-overlay { position:absolute; inset:0; background:rgba(0,0,0,.6); }
+            .dd-child-modal-box { position:relative; max-width:680px; margin:5vh auto; background:#fff; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,.3); display:flex; flex-direction:column; max-height:90vh; }
+            .dd-child-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #dcdcde; }
+            .dd-child-modal-head h2 { margin:0; font-size:16px; }
+            .dd-child-modal-close { background:none; border:none; font-size:24px; line-height:1; cursor:pointer; color:#646970; }
+            .dd-child-modal-form { overflow:auto; }
+            .dd-child-modal-body { padding:20px; }
+            .dd-child-modal-foot { display:flex; align-items:center; gap:10px; padding:14px 20px; border-top:1px solid #dcdcde; }
+            .dd-child-modal-foot .dd-child-modal-msg { flex:1; color:#b32d2e; }
+            .dd-modal-field { margin-bottom:16px; }
+            .dd-modal-field > label { display:block; font-weight:600; margin-bottom:5px; }
+            .dd-full-width { width:100%; }
+            .dd-cat-checklist { max-height:160px; overflow:auto; border:1px solid #dcdcde; padding:8px 12px; margin:0; border-radius:4px; }
+            .dd-cat-checklist ul.children { margin-left:18px; }
+            .dd-modal-subfield { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+            .dd-modal-sublabel { width:90px; color:#646970; }
+            .dd-child-modal.is-saving .dd-child-modal-box { opacity:.6; pointer-events:none; }
+        </style>
+
         <script>
-            (function() {
-                var depths = <?php echo wp_json_encode($map); ?>;
-                Object.keys(depths).forEach(function(id) {
-                    var row = document.getElementById('post-' + id);
-                    if (!row) return;
-                    var link = row.querySelector('.column-name .row-title, .column-name strong a, .row-title, .column-title strong a');
-                    if (!link || link.previousElementSibling && link.previousElementSibling.classList.contains('dd-tree-indent')) return;
-                    var prefix = document.createElement('span');
-                    prefix.className = 'dd-tree-indent';
-                    prefix.style.color = '#a0a5aa';
-                    prefix.textContent = new Array(depths[id] + 1).join('— ');
-                    link.parentNode.insertBefore(prefix, link);
+            (function($) {
+                var nonce = $('#silvertell_child_nonce').val();
+                var $modal = $('#dd-child-modal');
+                var $manager = $('.dd-children-manager');
+                var rootParent = $manager.data('parent');
+
+                function openModal(id, parent, title) {
+                    $modal.find('.dd-child-modal-title').text(title);
+                    $modal.find('.dd-child-modal-msg').text('');
+                    $modal.find('.dd-child-modal-body').html('<p>Loading…</p>');
+                    $modal.show();
+                    $.post(ajaxurl, { action: 'silvertell_child_form', nonce: nonce, id: id, parent: parent }, function(res) {
+                        if (res && res.success) {
+                            $modal.find('.dd-child-modal-body').html(res.data.html);
+                        } else {
+                            $modal.find('.dd-child-modal-body').html('<p>Could not load the form.</p>');
+                        }
+                    });
+                }
+                function closeModal() { $modal.hide(); }
+
+                $manager.on('click', '.dd-child-edit', function() {
+                    openModal($(this).data('id'), 0, '<?php echo esc_js(__('Edit Child Product', 'silvertell-wc-customisation')); ?>');
                 });
-            })();
+                $manager.on('click', '.dd-child-add', function() {
+                    openModal(0, $(this).data('parent'), '<?php echo esc_js(__('Add Child Product', 'silvertell-wc-customisation')); ?>');
+                });
+                $manager.on('click', '.dd-child-delete', function() {
+                    if (!confirm('<?php echo esc_js(__('Delete this child product and its sub-items?', 'silvertell-wc-customisation')); ?>')) return;
+                    $.post(ajaxurl, { action: 'silvertell_child_delete', nonce: nonce, id: $(this).data('id'), root: rootParent }, function(res) {
+                        if (res && res.success) $('.dd-child-list-wrap').html(res.data.list);
+                    });
+                });
+
+                $modal.on('click', '.dd-child-modal-close, .dd-child-modal-cancel, .dd-child-modal-overlay', closeModal);
+                $modal.on('click', '.dd-attr-add', function() {
+                    $(this).closest('.dd-modal-field').find('.dd-attr-rows').append($('.dd-attr-template').html());
+                });
+                $modal.on('click', '.dd-attr-del', function() { $(this).closest('.dd-attr-row').remove(); });
+
+                $modal.on('click', '.dd-child-modal-save', function() {
+                    var $btn = $(this);
+                    var data = $modal.find('.dd-child-modal-form').serialize();
+                    data += '&action=silvertell_child_save&nonce=' + encodeURIComponent(nonce) + '&root=' + encodeURIComponent(rootParent);
+                    $modal.addClass('is-saving');
+                    $modal.find('.dd-child-modal-msg').text('');
+                    $.post(ajaxurl, data, function(res) {
+                        $modal.removeClass('is-saving');
+                        if (res && res.success) {
+                            $('.dd-child-list-wrap').html(res.data.list);
+                            closeModal();
+                        } else {
+                            $modal.find('.dd-child-modal-msg').text((res && res.data && res.data.message) ? res.data.message : 'Save failed.');
+                        }
+                    });
+                });
+            })(jQuery);
         </script>
-<?php
+        <?php
     }
 
     /**

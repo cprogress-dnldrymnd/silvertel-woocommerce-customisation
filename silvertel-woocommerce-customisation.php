@@ -1600,6 +1600,9 @@ class Silvertell_Woocommerce_Customisation
                 font-size: 13px;
                 margin-top: 8px;
             }
+            .woocommerce-Tabs-panel > h2 {
+                display: none;
+            }
         </style>
         <script>
             /* Lightweight tab switcher: ensures only the active panel is shown.

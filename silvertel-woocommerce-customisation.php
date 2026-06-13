@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.25.0
+ * Version: 2.26.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1181,6 +1181,66 @@ class Silvertell_Woocommerce_Customisation
         if (! function_exists('is_product') || ! is_product()) return;
     ?>
         <style>
+            /* ---- Single-product tab navigation (horizontal, underlined active) ---- */
+            .woocommerce-tabs ul.tabs.wc-tabs {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 28px;
+                list-style: none;
+                margin: 0 0 28px;
+                padding: 0;
+                border-bottom: 1px solid #e0e0e0;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs:before,
+            .woocommerce-tabs ul.tabs.wc-tabs:after {
+                content: none;
+                display: none;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs li {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+                background: none;
+                border: 0;
+                border-radius: 0;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs li:before,
+            .woocommerce-tabs ul.tabs.wc-tabs li:after {
+                content: none;
+                display: none;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs li a {
+                display: block;
+                padding: 0 0 14px;
+                margin-bottom: -1px;
+                border-bottom: 2px solid transparent;
+                color: #777;
+                font-weight: 500;
+                font-size: 15px;
+                line-height: 1.4;
+                text-decoration: none;
+                box-shadow: none;
+                background: none;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs li a:hover {
+                color: #111;
+            }
+
+            .woocommerce-tabs ul.tabs.wc-tabs li.active a,
+            .woocommerce-tabs ul.tabs.wc-tabs li[aria-selected="true"] a {
+                color: #111;
+                border-bottom-color: #111;
+            }
+
+            .woocommerce-tabs .woocommerce-Tabs-panel {
+                padding-top: 5px;
+            }
+
             .dd-tab-content {
                 margin: 0 0 10px;
             }
@@ -1284,6 +1344,37 @@ class Silvertell_Woocommerce_Customisation
                 margin-top: 12px;
             }
         </style>
+        <script>
+            /* Lightweight tab switcher: ensures only the active panel is shown.
+               Idempotent with WooCommerce's native tabs.js when that is present;
+               provides the behaviour when the theme/Elementor context does not. */
+            (function ($) {
+                $(function () {
+                    $('.woocommerce-tabs').each(function () {
+                        var $wrap   = $(this);
+                        var $tabs   = $wrap.find('ul.tabs.wc-tabs > li');
+                        var $panels = $wrap.find('.woocommerce-Tabs-panel, .wc-tab');
+                        if (!$tabs.length || !$panels.length) return;
+
+                        function activate($li) {
+                            var target = $li.find('a').attr('href');
+                            $tabs.removeClass('active').attr('aria-selected', 'false');
+                            $panels.hide();
+                            $li.addClass('active').attr('aria-selected', 'true');
+                            if (target) $(target).show();
+                        }
+
+                        var $start = $tabs.filter('.active').first();
+                        activate($start.length ? $start : $tabs.first());
+
+                        $tabs.on('click', function (e) {
+                            e.preventDefault();
+                            activate($(this));
+                        });
+                    });
+                });
+            })(jQuery);
+        </script>
     <?php
     }
 

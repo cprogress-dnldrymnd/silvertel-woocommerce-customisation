@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.29.1
+ * Version: 2.30.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -968,10 +968,7 @@ class Silvertell_Woocommerce_Customisation
         $doc_ids = get_post_meta($product->get_id(), '_linked_documents', true);
         if (empty($doc_ids) || ! is_array($doc_ids)) return;
 
-        // Group docs by their (first) product-support-category term; untagged go last.
-        $grouped   = [];
-        $ungrouped = [];
-
+        $docs = [];
         foreach ($doc_ids as $doc_id) {
             $doc_id = (int) $doc_id;
             if (! $doc_id) continue;
@@ -980,39 +977,31 @@ class Silvertell_Woocommerce_Customisation
             $file_url = is_numeric($file_val) ? wp_get_attachment_url($file_val) : $file_val;
             if (empty($file_url)) continue;
 
-            $entry = ['title' => get_the_title($doc_id), 'url' => $file_url];
-            $terms = get_the_terms($doc_id, 'product-support-category');
-
-            if (! empty($terms) && ! is_wp_error($terms)) {
-                $grouped[$terms[0]->name][] = $entry;
-            } else {
-                $ungrouped[] = $entry;
-            }
+            $docs[] = ['title' => get_the_title($doc_id), 'url' => $file_url];
         }
 
-        if (empty($grouped) && empty($ungrouped)) return;
+        if (empty($docs)) return;
 
         echo '<div class="dd-tab-content dd-documents-tab">';
-        foreach ($grouped as $cat_name => $docs) {
-            echo '<h3 class="dd-doc-group-title">' . esc_html($cat_name) . '</h3>';
-            $this->render_document_links($docs);
+        echo '<div class="dd-doc-grid">';
+        foreach ($docs as $doc) {
+            echo $this->render_download_button($doc['title'], $doc['url']);
         }
-        if (! empty($ungrouped)) {
-            if (! empty($grouped)) {
-                echo '<h3 class="dd-doc-group-title">' . esc_html__('Other Documents', 'silvertell-wc-customisation') . '</h3>';
-            }
-            $this->render_document_links($ungrouped);
-        }
+        echo '</div>';
         echo '</div>';
     }
 
-    private function render_document_links($docs)
+    /**
+     * A button-style download link with a leading download icon. Shared by the Documents
+     * tab and the Evaluation Board manual.
+     */
+    private function render_download_button($label, $url)
     {
-        echo '<ul class="dd-doc-list">';
-        foreach ($docs as $doc) {
-            echo '<li><a class="dd-doc-link" href="' . esc_url($doc['url']) . '" target="_blank" rel="noopener">' . esc_html($doc['title']) . '</a></li>';
-        }
-        echo '</ul>';
+        $icon = '<svg class="dd-doc-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
+        return '<a class="dd-doc-btn" href="' . esc_url($url) . '" target="_blank" rel="noopener" download>'
+            . $icon
+            . '<span class="dd-doc-btn-label">' . esc_html($label) . '</span></a>';
     }
 
     public function render_evaluation_boards_tab()
@@ -1068,7 +1057,7 @@ class Silvertell_Woocommerce_Customisation
         $manual     = get_post_meta($eb_id, '_manual', true);
         $manual_url = is_numeric($manual) ? wp_get_attachment_url($manual) : $manual;
         if (! empty($manual_url)) {
-            echo '<p class="dd-eb-manual"><a class="dd-doc-link" href="' . esc_url($manual_url) . '" target="_blank" rel="noopener">' . esc_html__('User Manual (PDF)', 'silvertell-wc-customisation') . '</a></p>';
+            echo '<div class="dd-eb-manual dd-doc-grid">' . $this->render_download_button(__('User Manual (PDF)', 'silvertell-wc-customisation'), $manual_url) . '</div>';
         }
 
         $buttons = $this->render_provider_buttons($eb_id);
@@ -1416,8 +1405,7 @@ class Silvertell_Woocommerce_Customisation
                 margin: 0 0 10px;
             }
 
-            .dd-feature-list,
-            .dd-doc-list {
+            .dd-feature-list {
                 margin: 0 0 15px 20px;
                 padding: 0;
             }
@@ -1426,21 +1414,61 @@ class Silvertell_Woocommerce_Customisation
                 margin: 0 0 12px;
             }
 
-            .dd-feature-list li,
-            .dd-doc-list li {
+            .dd-feature-list li {
                 margin-bottom: 8px;
             }
 
-            .dd-doc-group-title,
             .dd-range-group-title,
             .dd-eb-group-title {
                 margin: 25px 0 12px;
                 font-size: 18px;
             }
 
-            .dd-doc-group-title:first-child,
             .dd-range-group-title:first-child {
                 margin-top: 0;
+            }
+
+            .dd-doc-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                gap: 12px;
+                margin-bottom: 15px;
+            }
+
+            .dd-doc-btn {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 14px 16px;
+                background: #f6f7f7;
+                border: 1px solid #d8dadc;
+                border-radius: 6px;
+                color: #1d2327;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 14px;
+                line-height: 1.3;
+                transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+            }
+
+            .dd-doc-btn:hover {
+                background: #2271b1;
+                border-color: #2271b1;
+                color: #fff;
+            }
+
+            .dd-doc-icon {
+                flex: 0 0 auto;
+                color: #2271b1;
+                transition: color 0.15s ease;
+            }
+
+            .dd-doc-btn:hover .dd-doc-icon {
+                color: #fff;
+            }
+
+            .dd-doc-btn-label {
+                flex: 1;
             }
 
             .dd-range-table,

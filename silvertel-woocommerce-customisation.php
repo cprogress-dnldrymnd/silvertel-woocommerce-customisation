@@ -1494,7 +1494,9 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-buy-btn {
-               display: inline-block;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
                 margin: 2px 6px 2px 0;
                 padding: 10px 25px;
                 background: #0089FF;
@@ -1502,7 +1504,6 @@ class Silvertell_Woocommerce_Customisation
                 border-radius: 50px;
                 font-size: 13px;
                 line-height: 1.4;
-                text-decoration: none;
             }
 
             .dd-buy-btn:hover {

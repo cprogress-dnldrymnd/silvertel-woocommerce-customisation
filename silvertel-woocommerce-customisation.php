@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.29.0
+ * Version: 2.29.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -950,107 +950,10 @@ class Silvertell_Woocommerce_Customisation
     {
         if (! class_exists('\Elementor\Widget_Base')) return;
 
-        // Keep this plugin single-file: declare the widget class inline. The
-        // declaration is conditional (the parent class only exists once Elementor
-        // has loaded) so it is not hoisted and runs at most once.
-        if (! class_exists('Silvertell_Features_Elementor_Widget')) {
-            class Silvertell_Features_Elementor_Widget extends \Elementor\Widget_Base
-            {
-                public function get_name()
-                {
-                    return 'silvertell_product_features';
-                }
-
-                public function get_title()
-                {
-                    return __('Product Features', 'silvertell-wc-customisation');
-                }
-
-                public function get_icon()
-                {
-                    return 'eicon-bullet-list';
-                }
-
-                public function get_categories()
-                {
-                    return ['woocommerce-elements-single', 'woocommerce-elements', 'general'];
-                }
-
-                public function get_keywords()
-                {
-                    return ['features', 'product', 'woocommerce', 'silvertell', 'list'];
-                }
-
-                protected function register_controls()
-                {
-                    $this->start_controls_section('content_section', [
-                        'label' => __('Content', 'silvertell-wc-customisation'),
-                        'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
-                    ]);
-
-                    $this->add_control('heading', [
-                        'label'       => __('Heading', 'silvertell-wc-customisation'),
-                        'type'        => \Elementor\Controls_Manager::TEXT,
-                        'default'     => __('Features', 'silvertell-wc-customisation'),
-                        'placeholder' => __('Leave blank to hide the heading', 'silvertell-wc-customisation'),
-                        'label_block' => true,
-                    ]);
-
-                    $this->add_control('heading_tag', [
-                        'label'   => __('Heading HTML Tag', 'silvertell-wc-customisation'),
-                        'type'    => \Elementor\Controls_Manager::SELECT,
-                        'default' => 'h2',
-                        'options' => [
-                            'h1' => 'H1', 'h2' => 'H2', 'h3' => 'H3',
-                            'h4' => 'H4', 'h5' => 'H5', 'h6' => 'H6',
-                        ],
-                        'condition' => ['heading!' => ''],
-                    ]);
-
-                    $this->add_control('no_features_notice', [
-                        'type'            => \Elementor\Controls_Manager::RAW_HTML,
-                        'raw'             => __('This widget outputs the current product\'s Features (set on the product\'s Features tab in wp-admin). It is only visible when the product has features.', 'silvertell-wc-customisation'),
-                        'content_classes' => 'elementor-descriptor',
-                    ]);
-
-                    $this->end_controls_section();
-                }
-
-                protected function render()
-                {
-                    if (! function_exists('wc_get_product')) return;
-
-                    global $product;
-                    $current = $product instanceof WC_Product ? $product : wc_get_product(get_the_ID());
-                    if (! $current instanceof WC_Product) {
-                        if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
-                            echo '<p>' . esc_html__('No product in context — preview on a product page.', 'silvertell-wc-customisation') . '</p>';
-                        }
-                        return;
-                    }
-
-                    $html = Silvertell_Woocommerce_Customisation::get_features_list_html($current->get_id());
-                    if ($html === '') {
-                        if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
-                            echo '<p>' . esc_html__('This product has no features yet.', 'silvertell-wc-customisation') . '</p>';
-                        }
-                        return;
-                    }
-
-                    $settings = $this->get_settings_for_display();
-                    $heading  = isset($settings['heading']) ? trim($settings['heading']) : '';
-
-                    echo '<div class="dd-features-widget">';
-                    if ($heading !== '') {
-                        $tag = isset($settings['heading_tag']) ? $settings['heading_tag'] : 'h2';
-                        $tag = in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true) ? $tag : 'h2';
-                        echo '<' . $tag . ' class="dd-features-widget-title">' . esc_html($heading) . '</' . $tag . '>';
-                    }
-                    echo $html; // already escaped in get_features_list_html()
-                    echo '</div>';
-                }
-            }
-        }
+        // The widget class is declared by a top-level function (PHP forbids
+        // declaring a class inside a class method) that runs lazily here, once
+        // Elementor's base class is guaranteed to exist.
+        silvertell_define_features_elementor_widget();
 
         if (class_exists('Silvertell_Features_Elementor_Widget')) {
             $widgets_manager->register(new Silvertell_Features_Elementor_Widget());
@@ -2353,3 +2256,115 @@ class Silvertell_Woocommerce_Customisation
 }
 
 new Silvertell_Woocommerce_Customisation();
+
+/**
+ * Declare the "Product Features" Elementor widget class.
+ *
+ * Kept as a top-level function (not a class method) because PHP does not allow
+ * a class declaration to be nested inside another class. It is called lazily
+ * from Silvertell_Woocommerce_Customisation::register_elementor_widgets() on the
+ * `elementor/widgets/register` hook, so \Elementor\Widget_Base is loaded by then.
+ * The class_exists guards make it safe to call more than once.
+ */
+function silvertell_define_features_elementor_widget()
+{
+    if (class_exists('Silvertell_Features_Elementor_Widget')) return;
+    if (! class_exists('\Elementor\Widget_Base')) return;
+
+    class Silvertell_Features_Elementor_Widget extends \Elementor\Widget_Base
+    {
+        public function get_name()
+        {
+            return 'silvertell_product_features';
+        }
+
+        public function get_title()
+        {
+            return __('Product Features', 'silvertell-wc-customisation');
+        }
+
+        public function get_icon()
+        {
+            return 'eicon-bullet-list';
+        }
+
+        public function get_categories()
+        {
+            return ['woocommerce-elements-single', 'woocommerce-elements', 'general'];
+        }
+
+        public function get_keywords()
+        {
+            return ['features', 'product', 'woocommerce', 'silvertell', 'list'];
+        }
+
+        protected function register_controls()
+        {
+            $this->start_controls_section('content_section', [
+                'label' => __('Content', 'silvertell-wc-customisation'),
+                'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
+            ]);
+
+            $this->add_control('heading', [
+                'label'       => __('Heading', 'silvertell-wc-customisation'),
+                'type'        => \Elementor\Controls_Manager::TEXT,
+                'default'     => __('Features', 'silvertell-wc-customisation'),
+                'placeholder' => __('Leave blank to hide the heading', 'silvertell-wc-customisation'),
+                'label_block' => true,
+            ]);
+
+            $this->add_control('heading_tag', [
+                'label'   => __('Heading HTML Tag', 'silvertell-wc-customisation'),
+                'type'    => \Elementor\Controls_Manager::SELECT,
+                'default' => 'h2',
+                'options' => [
+                    'h1' => 'H1', 'h2' => 'H2', 'h3' => 'H3',
+                    'h4' => 'H4', 'h5' => 'H5', 'h6' => 'H6',
+                ],
+                'condition' => ['heading!' => ''],
+            ]);
+
+            $this->add_control('no_features_notice', [
+                'type'            => \Elementor\Controls_Manager::RAW_HTML,
+                'raw'             => __('This widget outputs the current product\'s Features (set on the product\'s Features tab in wp-admin). It is only visible when the product has features.', 'silvertell-wc-customisation'),
+                'content_classes' => 'elementor-descriptor',
+            ]);
+
+            $this->end_controls_section();
+        }
+
+        protected function render()
+        {
+            if (! function_exists('wc_get_product')) return;
+
+            global $product;
+            $current = $product instanceof WC_Product ? $product : wc_get_product(get_the_ID());
+            if (! $current instanceof WC_Product) {
+                if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
+                    echo '<p>' . esc_html__('No product in context — preview on a product page.', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            $html = Silvertell_Woocommerce_Customisation::get_features_list_html($current->get_id());
+            if ($html === '') {
+                if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
+                    echo '<p>' . esc_html__('This product has no features yet.', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            $settings = $this->get_settings_for_display();
+            $heading  = isset($settings['heading']) ? trim($settings['heading']) : '';
+
+            echo '<div class="dd-features-widget">';
+            if ($heading !== '') {
+                $tag = isset($settings['heading_tag']) ? $settings['heading_tag'] : 'h2';
+                $tag = in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true) ? $tag : 'h2';
+                echo '<' . $tag . ' class="dd-features-widget-title">' . esc_html($heading) . '</' . $tag . '>';
+            }
+            echo $html; // already escaped in get_features_list_html()
+            echo '</div>';
+        }
+    }
+}

@@ -1497,7 +1497,7 @@ class Silvertell_Woocommerce_Customisation
                 display: inline-block;
                 margin: 2px 6px 2px 0;
                 padding: 5px 12px;
-                background: #2271b1;
+                background: #0089FF;
                 color: #fff;
                 border-radius: 4px;
                 font-size: 13px;

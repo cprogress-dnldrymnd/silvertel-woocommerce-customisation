@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.32.1
+ * Version: 2.33.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1110,24 +1110,25 @@ class Silvertell_Woocommerce_Customisation
 
         <div class="dd-modal-field">
             <label><?php esc_html_e('Attributes', 'silvertell-wc-customisation'); ?></label>
-            <p class="description" style="margin:0 0 8px;"><?php esc_html_e('Name and value (use "|" to separate multiple values).', 'silvertell-wc-customisation'); ?></p>
+            <p class="description" style="margin:0 0 8px;"><?php esc_html_e('Pick a global attribute and its value(s), or choose "Custom" to type a name and value (use "|" for multiple values).', 'silvertell-wc-customisation'); ?></p>
             <div class="dd-attr-rows">
                 <?php
-                $rows = [];
+                $index = 0;
                 if ($product) {
-                    foreach ($product->get_attributes() as $key => $attr) {
+                    foreach ($product->get_attributes() as $attr) {
                         if (! is_object($attr)) continue;
-                        $rows[] = [
-                            'name'  => $attr->get_name(),
-                            'value' => implode(' | ', $attr->get_options()),
-                        ];
+                        if (method_exists($attr, 'is_taxonomy') && $attr->is_taxonomy()) {
+                            $this->render_child_attr_row($index, $attr->get_name(), '', '', $attr->get_options());
+                        } else {
+                            $this->render_child_attr_row($index, '', $attr->get_name(), implode(' | ', $attr->get_options()), []);
+                        }
+                        $index++;
                     }
                 }
-                foreach ($rows as $row) $this->render_child_attr_row($row['name'], $row['value']);
                 ?>
             </div>
             <button type="button" class="button dd-attr-add" style="margin-top:6px;"><?php esc_html_e('Add Attribute', 'silvertell-wc-customisation'); ?></button>
-            <script type="text/template" class="dd-attr-template"><?php $this->render_child_attr_row('', ''); ?></script>
+            <script type="text/template" class="dd-attr-template"><?php $this->render_child_attr_row('__INDEX__'); ?></script>
         </div>
 
         <div class="dd-modal-field">
@@ -1144,15 +1145,74 @@ class Silvertell_Woocommerce_Customisation
         wp_send_json_success(['html' => ob_get_clean()]);
     }
 
-    private function render_child_attr_row($name, $value)
+    /**
+     * Render one attribute row: a global-attribute (taxonomy) selector with a multi-select
+     * of its terms, plus name/value inputs used when "Custom" is chosen. $index keys the
+     * row in the posted attrs[] array ('__INDEX__' for the JS clone template).
+     */
+    private function render_child_attr_row($index, $tax = '', $name = '', $value = '', $selected_terms = [])
     {
+        $choices        = $this->get_attribute_taxonomy_choices();
+        $is_global      = $tax !== '' && isset($choices[$tax]);
+        $selected_terms = array_map('intval', (array) $selected_terms);
+        $base           = 'attrs[' . $index . ']';
         ?>
-        <div class="dd-attr-row" style="display:flex; gap:8px; margin-bottom:6px;">
-            <input type="text" name="attr_name[]" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>" style="flex:1;">
-            <input type="text" name="attr_value[]" placeholder="<?php esc_attr_e('Value', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>" style="flex:2;">
+        <div class="dd-attr-row">
+            <select name="<?php echo esc_attr($base); ?>[tax]" class="dd-attr-tax">
+                <option value=""><?php esc_html_e('— Custom —', 'silvertell-wc-customisation'); ?></option>
+                <?php foreach ($choices as $slug => $label) : ?>
+                    <option value="<?php echo esc_attr($slug); ?>" <?php selected($tax, $slug); ?>><?php echo esc_html($label); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <input type="text" name="<?php echo esc_attr($base); ?>[name]" class="dd-attr-name" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
+            <input type="text" name="<?php echo esc_attr($base); ?>[value]" class="dd-attr-value" placeholder="<?php esc_attr_e('Value', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
+            <select name="<?php echo esc_attr($base); ?>[terms][]" class="dd-attr-terms" multiple<?php echo $is_global ? '' : ' style="display:none;"'; ?>>
+                <?php
+                if ($is_global) {
+                    $terms = get_terms(['taxonomy' => $tax, 'hide_empty' => false]);
+                    if (! is_wp_error($terms)) {
+                        foreach ($terms as $term) {
+                            echo '<option value="' . esc_attr($term->term_id) . '" ' . selected(in_array((int) $term->term_id, $selected_terms, true), true, false) . '>' . esc_html($term->name) . '</option>';
+                        }
+                    }
+                }
+                ?>
+            </select>
             <button type="button" class="button dd-attr-del">&times;</button>
         </div>
         <?php
+    }
+
+    /**
+     * [ taxonomy slug => label ] for every registered global product attribute.
+     */
+    private function get_attribute_taxonomy_choices()
+    {
+        $choices = [];
+        if (! function_exists('wc_get_attribute_taxonomies')) return $choices;
+        foreach (wc_get_attribute_taxonomies() as $tax) {
+            $slug = wc_attribute_taxonomy_name($tax->attribute_name);
+            $choices[$slug] = $tax->attribute_label ? $tax->attribute_label : $tax->attribute_name;
+        }
+        return $choices;
+    }
+
+    /**
+     * [ taxonomy slug => [ ['id'=>, 'name'=>], ... ] ] of terms, for the popup's JS to
+     * repopulate the term selector when the chosen global attribute changes.
+     */
+    private function get_attribute_terms_map()
+    {
+        $map = [];
+        foreach (array_keys($this->get_attribute_taxonomy_choices()) as $slug) {
+            $map[$slug] = [];
+            $terms = get_terms(['taxonomy' => $slug, 'hide_empty' => false]);
+            if (is_wp_error($terms)) continue;
+            foreach ($terms as $term) {
+                $map[$slug][] = ['id' => (int) $term->term_id, 'name' => $term->name];
+            }
+        }
+        return $map;
     }
 
     /**
@@ -1194,29 +1254,55 @@ class Silvertell_Woocommerce_Customisation
         }
         $product->set_category_ids($cat_ids);
 
-        // Attributes (custom, all visible).
-        $names  = isset($_POST['attr_name']) ? (array) wp_unslash($_POST['attr_name']) : [];
-        $values = isset($_POST['attr_value']) ? (array) wp_unslash($_POST['attr_value']) : [];
-        $attributes = [];
-        foreach ($names as $i => $raw_name) {
-            $name = sanitize_text_field($raw_name);
-            if ($name === '') continue;
-            $raw_val = isset($values[$i]) ? $values[$i] : '';
-            $options = array_values(array_filter(array_map('trim', explode('|', $raw_val)), 'strlen'));
+        // Attributes — each row is either a global (taxonomy) attribute with selected
+        // terms, or a custom name/value pair. All saved as visible, non-variation.
+        $attrs_in     = isset($_POST['attrs']) && is_array($_POST['attrs']) ? wp_unslash($_POST['attrs']) : [];
+        $attributes   = [];
+        $tax_term_map = [];
+        foreach ($attrs_in as $row) {
+            if (! is_array($row)) continue;
+            $tax = isset($row['tax']) ? sanitize_text_field($row['tax']) : '';
 
-            $attribute = new WC_Product_Attribute();
-            $attribute->set_id(0);
-            $attribute->set_name($name);
-            $attribute->set_options($options);
-            $attribute->set_position(count($attributes));
-            $attribute->set_visible(true);
-            $attribute->set_variation(false);
-            $attributes[] = $attribute;
+            if ($tax !== '' && taxonomy_exists($tax)) {
+                $term_ids = isset($row['terms']) ? array_values(array_filter(array_map('absint', (array) $row['terms']))) : [];
+                if (empty($term_ids)) continue;
+
+                $attribute = new WC_Product_Attribute();
+                $attribute->set_id(wc_attribute_taxonomy_id_by_name($tax));
+                $attribute->set_name($tax);
+                $attribute->set_options($term_ids);
+                $attribute->set_position(count($attributes));
+                $attribute->set_visible(true);
+                $attribute->set_variation(false);
+                $attributes[] = $attribute;
+
+                $tax_term_map[$tax] = array_merge($tax_term_map[$tax] ?? [], $term_ids);
+            } else {
+                $name = isset($row['name']) ? sanitize_text_field($row['name']) : '';
+                if ($name === '') continue;
+                $raw_val = isset($row['value']) ? $row['value'] : '';
+                $options = array_values(array_filter(array_map('trim', explode('|', $raw_val)), 'strlen'));
+
+                $attribute = new WC_Product_Attribute();
+                $attribute->set_id(0);
+                $attribute->set_name($name);
+                $attribute->set_options($options);
+                $attribute->set_position(count($attributes));
+                $attribute->set_visible(true);
+                $attribute->set_variation(false);
+                $attributes[] = $attribute;
+            }
         }
         $product->set_attributes($attributes);
 
         $saved_id = $product->save();
         if (! $saved_id) wp_send_json_error(['message' => 'save_failed']);
+
+        // Assign/clear the term relationships for every global attribute taxonomy so the
+        // frontend (get_attribute) resolves them to term names.
+        foreach (array_keys($this->get_attribute_taxonomy_choices()) as $slug) {
+            wp_set_object_terms($saved_id, $tax_term_map[$slug] ?? [], $slug, false);
+        }
 
         // Buy Samples meta.
         $providers   = $this->get_sample_providers();
@@ -1319,6 +1405,12 @@ class Silvertell_Woocommerce_Customisation
             .dd-modal-subfield { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
             .dd-modal-sublabel { width:90px; color:#646970; }
             .dd-child-modal.is-saving .dd-child-modal-box { opacity:.6; pointer-events:none; }
+            .dd-attr-row { display:flex; gap:8px; margin-bottom:8px; align-items:flex-start; }
+            .dd-attr-row .dd-attr-tax { flex:0 0 190px; }
+            .dd-attr-row .dd-attr-name { flex:1; }
+            .dd-attr-row .dd-attr-value { flex:2; }
+            .dd-attr-row .dd-attr-terms { flex:2; min-height:72px; }
+            .dd-attr-row .dd-attr-del { flex:0 0 auto; }
         </style>
 
         <script>
@@ -1327,6 +1419,27 @@ class Silvertell_Woocommerce_Customisation
                 var $modal = $('#dd-child-modal');
                 var $manager = $('.dd-children-manager');
                 var rootParent = $manager.data('parent');
+                var ddAttrTerms = <?php echo wp_json_encode($this->get_attribute_terms_map()); ?>;
+                var attrIdx = 0;
+
+                // Toggle a row between global (term picker) and custom (name/value) mode.
+                function syncAttrRow($row) {
+                    var tax = $row.find('.dd-attr-tax').val();
+                    var $name = $row.find('.dd-attr-name');
+                    var $value = $row.find('.dd-attr-value');
+                    var $terms = $row.find('.dd-attr-terms');
+                    if (tax) {
+                        $name.hide(); $value.hide();
+                        $terms.empty();
+                        (ddAttrTerms[tax] || []).forEach(function(o) {
+                            $terms.append($('<option>').val(o.id).text(o.name));
+                        });
+                        $terms.show();
+                    } else {
+                        $terms.hide().empty();
+                        $name.show(); $value.show();
+                    }
+                }
 
                 function openModal(id, parent, title) {
                     $modal.find('.dd-child-modal-title').text(title);
@@ -1358,9 +1471,11 @@ class Silvertell_Woocommerce_Customisation
 
                 $modal.on('click', '.dd-child-modal-close, .dd-child-modal-cancel, .dd-child-modal-overlay', closeModal);
                 $modal.on('click', '.dd-attr-add', function() {
-                    $(this).closest('.dd-modal-field').find('.dd-attr-rows').append($('.dd-attr-template').html());
+                    var tpl = $('.dd-attr-template').html().replace(/__INDEX__/g, 'new' + (attrIdx++));
+                    $(this).closest('.dd-modal-field').find('.dd-attr-rows').append(tpl);
                 });
                 $modal.on('click', '.dd-attr-del', function() { $(this).closest('.dd-attr-row').remove(); });
+                $modal.on('change', '.dd-attr-tax', function() { syncAttrRow($(this).closest('.dd-attr-row')); });
 
                 $modal.on('click', '.dd-child-modal-save', function() {
                     var $btn = $(this);

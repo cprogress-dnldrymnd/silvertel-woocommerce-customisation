@@ -1,0 +1,123 @@
+# CLAUDE.md
+
+Guidance for Claude Code when working in this repository.
+
+## Overview
+
+A single-file WordPress plugin (`silvertel-woocommerce-customisation.php`) that extends
+WooCommerce for Silvertell. It adds an `evaluation-board` custom post type, a bespoke
+AJAX-chunked CSV importer that sideloads remote images while building hierarchical
+categories, an interceptor that sideloads files during native WooCommerce product
+imports, four custom product-data tabs, and a self-contained "native repeater" admin UI
+(no ACF or other field-plugin dependency).
+
+## Commands
+
+There is **no build, test, or lint tooling** — it's a plain PHP plugin with no
+`composer.json`, `package.json`, or CI. Working with it means editing the one file and
+deploying it to a WordPress install:
+
+- Deploy: copy `silvertel-woocommerce-customisation.php` into
+  `wp-content/plugins/silvertel-woocommerce-customisation/`, then activate it in
+  **wp-admin → Plugins**.
+- Requires an active **WooCommerce** install (the plugin assumes WC functions/hooks exist
+  and gates its admin pages on the `manage_woocommerce` capability).
+- Sanity-check syntax locally with `php -l silvertel-woocommerce-customisation.php`.
+
+## Architecture
+
+Everything lives in one class, `Silvertell_Woocommerce_Customisation`, instantiated at
+the bottom of the file. **`register_hooks()` (top of the class) is the map of the whole
+plugin** — read it first; every feature is a hook registered there pointing at a method.
+
+The major subsystems:
+
+- **Evaluation Board CPT + taxonomy** (`register_evaluation_board_cpt`): registers the
+  hierarchical, private `evaluation-board` post type and `evaluation-board-category`
+  taxonomy. Each board is keyed by a `_unique_code` meta value used for import matching
+  and parent/child linking.
+
+- **Two distinct importers** — don't confuse them:
+  1. **Native WC product-import interceptor** (`intercept_meta_for_sideload`, on
+     `woocommerce_product_import_pre_insert_product_object`): runs during WooCommerce's
+     built-in CSV product importer. It rewrites incoming meta — sideloads URL values for
+     configured keys and `_gallery_image_N`, folds `_document_*_N` columns into linked
+     `product-support` posts, folds `_feature(d)_N` columns into a `_features` array, and
+     resolves `_linked_eval_board(s)` codes/titles to post IDs.
+  2. **Standalone AJAX Evaluation Board importer** (`render_eb_importer_page` →
+     `ajax_import_chunk` → `ajax_import_hierarchy`): a separate two-step UI under
+     *Evaluation Boards → Import CSV*. Step 1 uploads a CSV to the uploads dir; step 2
+     processes it 5 rows at a time over AJAX with a live progress bar/log, then runs a
+     final hierarchy pass. Parent links are **deferred**: child→parent code pairs are
+     stashed in the `silvertell_eb_delayed_parents` transient during the row pass and
+     resolved only after all rows exist, so forward references work. The temp CSV is
+     `unlink()`ed at the end of the hierarchy pass.
+
+- **Shared helpers** used by both importers:
+  - `sideload_file_to_media_library($url, $parent_id)`: downloads a URL into the media
+    library, **deduping by the `_source_url` postmeta** so re-imports don't duplicate
+    attachments. Returns an attachment ID or `WP_Error`.
+  - `assign_hierarchical_terms_to_post($post_id, $string, $taxonomy)`: parses category
+    strings like `Parent > Child, Other Chain`, HTML-entity-decoding first, splitting on
+    commas (independent chains) then `>` (depth), creating terms as needed and matching
+    ampersand variants to avoid duplicates.
+
+- **Custom product-data tabs** (`add_custom_product_data_tabs` /
+  `render_custom_product_data_panels` / `save_custom_product_data`): adds **Buy Samples**
+  (dynamic provider URL fields), **Documents** (multi-select of `product-support` posts →
+  `_linked_documents`), **Features** (repeater → `_features`), and **Evaluation Boards**
+  (multi-select → `_linked_eval_boards`) to the product editor.
+
+- **Meta boxes**: PDF config on `product-support` posts (`pdf_file` meta), and Evaluation
+  Board details (`_unique_code`, `_manual`, and per-provider sample URLs).
+
+- **Settings page** (*WooCommerce → Silvertell Settings*): edits the
+  `silvertell_file_meta_keys` option (comma-separated meta keys the product-import
+  interceptor will sideload) and the `silvertell_sample_providers` option (a repeater of
+  name/meta-key/logo; defaults to Farnell/Mouser/Digikey).
+
+- **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
+  inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,
+  jQuery-UI sortable drag handles, and `wp.media` file pickers (`.dd-upload-file` →
+  `.dd-file-input`, with optional `data-sync` to mirror a value across inputs). This is
+  the project's home-grown alternative to a field plugin.
+
+## Conventions
+
+- **Prefixes carry meaning.** `silvertell_`/`silvertell-` namespaces hooks, option names,
+  nonces, page slugs, and AJAX actions. `dd-` (Digitally Disruptive) namespaces all custom
+  admin CSS classes and the repeater JS. Meta keys are underscore-prefixed; user-entered
+  provider keys are auto-prefixed with `_` in `sanitize_sample_providers`.
+- **Sample providers are dynamic, never hardcoded.** Both the product "Buy Samples" tab
+  and the eval-board meta box loop over `get_sample_providers()`. Add provider fields by
+  editing the option via the settings page, not by adding code.
+- **Save handlers follow the WP triad**: verify the nonce, bail on `DOING_AUTOSAVE`, check
+  `current_user_can`, then sanitize before `update_post_meta`. Match this when adding
+  fields.
+- **Versioning**: bump the `Version:` header in the plugin docblock on every change — the
+  git history is almost entirely "Update …php" version bumps, so that header is the de
+  facto changelog.
+
+## Gotchas
+
+- **`product-support` CPT and `product-support-category` taxonomy are NOT registered in
+  this file.** The Documents tab, the document importer, and the default taxonomy in
+  `assign_hierarchical_terms_to_post` all assume they already exist (registered by the
+  theme or another plugin). If documents silently fail to save or link, check that those
+  are registered elsewhere.
+- **`reduce_import_batch_size` forces a batch size of 5 for *all* WooCommerce product
+  imports site-wide**, not just Silvertell ones — a deliberate throttle so sideloads don't
+  time out, but it slows every product import.
+- **Image sideloading is the main failure mode.** `download_url` is given a 60s HTTP
+  timeout and the AJAX importer can still hit server timeouts on large/slow images (the JS
+  surfaces a "Server Timeout" message). Expect slowness and partial-progress retries on
+  big imports.
+- **AJAX-importer CSV format** is column-driven: `Name` (required), `Unique Code`,
+  `Description`, `Categories` (hierarchical string), `Images` (URL → featured image),
+  `Parent` (a `_unique_code` to link to), and any `Meta: <key>` columns (a `Meta: _manual`
+  URL value gets sideloaded). The first header cell is BOM-stripped.
+- **Cross-request state lives in a transient.** Interrupting the AJAX import between the
+  row pass and the hierarchy pass can leave `silvertell_eb_delayed_parents` set and the
+  temp upload CSV un-deleted.
+- A few paths use **direct `$wpdb` queries** (the `_source_url` dedup lookup and
+  `clear_dynamic_meta_keys`); they're `prepare()`d, so keep them that way if edited.

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.24.0
+ * Version: 2.25.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -54,6 +54,10 @@ class Silvertell_Woocommerce_Customisation
         add_filter('woocommerce_product_data_tabs', [$this, 'add_custom_product_data_tabs']);
         add_action('woocommerce_product_data_panels', [$this, 'render_custom_product_data_panels']);
         add_action('woocommerce_process_product_meta', [$this, 'save_custom_product_data']);
+
+        // Frontend Single Product Tabs (rendered by the native WC tabs / Elementor Product Data Tabs widget)
+        add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs']);
+        add_action('wp_footer', [$this, 'inject_frontend_assets']);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -624,9 +628,10 @@ class Silvertell_Woocommerce_Customisation
     private function get_sample_providers()
     {
         $defaults = [
-            ['name' => 'Farnell', 'meta_key' => '_farnel_url', 'logo' => ''],
+            ['name' => 'Farnell', 'meta_key' => '_farnell_url', 'logo' => ''],
             ['name' => 'Mouser', 'meta_key' => '_mouser_url', 'logo' => ''],
             ['name' => 'Digikey', 'meta_key' => '_digikey_url', 'logo' => ''],
+            ['name' => 'Symmetry', 'meta_key' => '_symmetry_url', 'logo' => ''],
         ];
         return get_option('silvertell_sample_providers', $defaults);
     }
@@ -815,6 +820,471 @@ class Silvertell_Woocommerce_Customisation
         echo '</p>';
 
         echo '</div></div>';
+    }
+
+    // ==============================================================================
+    // FRONTEND SINGLE PRODUCT TABS
+    //
+    // Renders the admin-captured data on the product single page as native WooCommerce
+    // product tabs. Elementor Pro's "Product Data Tabs" widget (or the theme's default
+    // WC tabs) outputs these automatically via the woocommerce_product_tabs filter.
+    // ==============================================================================
+
+    public function register_frontend_product_tabs($tabs)
+    {
+        global $product;
+        if (! $product instanceof WC_Product) return $tabs;
+
+        $product_id = $product->get_id();
+
+        $features = get_post_meta($product_id, '_features', true);
+        if (! empty($features) && is_array($features)) {
+            $tabs['silvertell_features'] = [
+                'title'    => __('Features', 'silvertell-wc-customisation'),
+                'priority' => 15,
+                'callback' => [$this, 'render_features_tab'],
+            ];
+        }
+
+        if (! empty($this->get_range_groups($product_id))) {
+            $tabs['silvertell_product_range'] = [
+                'title'    => __('Product Range', 'silvertell-wc-customisation'),
+                'priority' => 20,
+                'callback' => [$this, 'render_product_range_tab'],
+            ];
+        }
+
+        $docs = get_post_meta($product_id, '_linked_documents', true);
+        if (! empty($docs) && is_array($docs)) {
+            $tabs['silvertell_documents'] = [
+                'title'    => __('Documents', 'silvertell-wc-customisation'),
+                'priority' => 25,
+                'callback' => [$this, 'render_documents_tab'],
+            ];
+        }
+
+        if (! empty($this->get_linked_eval_board_ids($product_id))) {
+            $tabs['silvertell_eval_boards'] = [
+                'title'    => __('Evaluation Boards', 'silvertell-wc-customisation'),
+                'priority' => 30,
+                'callback' => [$this, 'render_evaluation_boards_tab'],
+            ];
+        }
+
+        return $tabs;
+    }
+
+    /**
+     * Resolve a product's linked evaluation board IDs, honouring the legacy
+     * single-value `_linked_eval_board` meta as a fallback (mirrors the admin panel).
+     */
+    private function get_linked_eval_board_ids($product_id)
+    {
+        $eb_ids = get_post_meta($product_id, '_linked_eval_boards', true);
+        if (! is_array($eb_ids) || empty($eb_ids)) {
+            $old_single = get_post_meta($product_id, '_linked_eval_board', true);
+            $eb_ids = $old_single ? [(int) $old_single] : [];
+        }
+        return array_values(array_filter(array_map('intval', (array) $eb_ids)));
+    }
+
+    public function render_features_tab()
+    {
+        global $product;
+        if (! $product instanceof WC_Product) return;
+
+        $features = get_post_meta($product->get_id(), '_features', true);
+        if (empty($features) || ! is_array($features)) return;
+
+        echo '<div class="dd-tab-content dd-features-tab">';
+        echo '<ul class="dd-feature-list">';
+        foreach ($features as $feature) {
+            if (trim($feature) === '') continue;
+            echo '<li>' . esc_html($feature) . '</li>';
+        }
+        echo '</ul>';
+        echo '</div>';
+    }
+
+    public function render_documents_tab()
+    {
+        global $product;
+        if (! $product instanceof WC_Product) return;
+
+        $doc_ids = get_post_meta($product->get_id(), '_linked_documents', true);
+        if (empty($doc_ids) || ! is_array($doc_ids)) return;
+
+        // Group docs by their (first) product-support-category term; untagged go last.
+        $grouped   = [];
+        $ungrouped = [];
+
+        foreach ($doc_ids as $doc_id) {
+            $doc_id = (int) $doc_id;
+            if (! $doc_id) continue;
+
+            $file_val = get_post_meta($doc_id, 'pdf_file', true);
+            $file_url = is_numeric($file_val) ? wp_get_attachment_url($file_val) : $file_val;
+            if (empty($file_url)) continue;
+
+            $entry = ['title' => get_the_title($doc_id), 'url' => $file_url];
+            $terms = get_the_terms($doc_id, 'product-support-category');
+
+            if (! empty($terms) && ! is_wp_error($terms)) {
+                $grouped[$terms[0]->name][] = $entry;
+            } else {
+                $ungrouped[] = $entry;
+            }
+        }
+
+        if (empty($grouped) && empty($ungrouped)) return;
+
+        echo '<div class="dd-tab-content dd-documents-tab">';
+        foreach ($grouped as $cat_name => $docs) {
+            echo '<h3 class="dd-doc-group-title">' . esc_html($cat_name) . '</h3>';
+            $this->render_document_links($docs);
+        }
+        if (! empty($ungrouped)) {
+            if (! empty($grouped)) {
+                echo '<h3 class="dd-doc-group-title">' . esc_html__('Other Documents', 'silvertell-wc-customisation') . '</h3>';
+            }
+            $this->render_document_links($ungrouped);
+        }
+        echo '</div>';
+    }
+
+    private function render_document_links($docs)
+    {
+        echo '<ul class="dd-doc-list">';
+        foreach ($docs as $doc) {
+            echo '<li><a class="dd-doc-link" href="' . esc_url($doc['url']) . '" target="_blank" rel="noopener">' . esc_html($doc['title']) . '</a></li>';
+        }
+        echo '</ul>';
+    }
+
+    public function render_evaluation_boards_tab()
+    {
+        global $product;
+        if (! $product instanceof WC_Product) return;
+
+        $eb_ids = $this->get_linked_eval_board_ids($product->get_id());
+        if (empty($eb_ids)) return;
+
+        echo '<div class="dd-tab-content dd-eval-boards-tab">';
+        foreach ($eb_ids as $eb_id) {
+            $this->render_eval_board_card($eb_id);
+
+            // Orderable child boards (e.g. per-voltage variants), grouped by category.
+            $children = get_children([
+                'post_parent' => $eb_id,
+                'post_type'   => 'evaluation-board',
+                'post_status' => 'publish',
+                'numberposts' => -1,
+                'orderby'     => 'menu_order title',
+                'order'       => 'ASC',
+            ]);
+            if (! empty($children)) {
+                $this->render_eval_board_children_table($children);
+            }
+        }
+        echo '</div>';
+    }
+
+    private function render_eval_board_card($eb_id)
+    {
+        $post = get_post($eb_id);
+        if (! $post) return;
+
+        echo '<div class="dd-eb-card">';
+
+        $thumb = get_the_post_thumbnail($eb_id, 'medium', ['class' => 'dd-eb-image']);
+        if ($thumb) echo '<div class="dd-eb-image-wrap">' . $thumb . '</div>';
+
+        echo '<div class="dd-eb-body">';
+        echo '<h3 class="dd-eb-title">' . esc_html($post->post_title) . '</h3>';
+
+        if (trim($post->post_content) !== '') {
+            echo '<div class="dd-eb-desc">' . wp_kses_post(wpautop($post->post_content)) . '</div>';
+        }
+
+        $notes = get_post_meta($eb_id, '_notes', true);
+        if (! empty($notes)) {
+            echo '<div class="dd-eb-notes">' . wp_kses_post(wpautop($notes)) . '</div>';
+        }
+
+        $manual     = get_post_meta($eb_id, '_manual', true);
+        $manual_url = is_numeric($manual) ? wp_get_attachment_url($manual) : $manual;
+        if (! empty($manual_url)) {
+            echo '<p class="dd-eb-manual"><a class="dd-doc-link" href="' . esc_url($manual_url) . '" target="_blank" rel="noopener">' . esc_html__('User Manual (PDF)', 'silvertell-wc-customisation') . '</a></p>';
+        }
+
+        $buttons = $this->render_provider_buttons($eb_id);
+        if (! empty($buttons)) echo '<div class="dd-buy-wrap">' . $buttons . '</div>';
+
+        echo '</div></div>';
+    }
+
+    private function render_eval_board_children_table($children)
+    {
+        // Group children by their (first) evaluation-board-category term.
+        $groups = [];
+        foreach ($children as $child) {
+            $terms = get_the_terms($child->ID, 'evaluation-board-category');
+            $key   = (! empty($terms) && ! is_wp_error($terms)) ? $terms[0]->name : '';
+            $groups[$key][] = $child;
+        }
+
+        foreach ($groups as $group_name => $boards) {
+            if ($group_name !== '') {
+                echo '<h4 class="dd-eb-group-title">' . esc_html($group_name) . '</h4>';
+            }
+            echo '<table class="dd-eb-table"><tbody>';
+            foreach ($boards as $board) {
+                $buttons = $this->render_provider_buttons($board->ID);
+                echo '<tr>';
+                echo '<td class="dd-eb-name">' . esc_html($board->post_title) . '</td>';
+                echo '<td class="dd-eb-buy">' . ($buttons ?: '&mdash;') . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        }
+    }
+
+    public function render_product_range_tab()
+    {
+        global $product;
+        if (! $product instanceof WC_Product) return;
+
+        $groups = $this->get_range_groups($product->get_id());
+        if (empty($groups)) return;
+
+        echo '<div class="dd-tab-content dd-product-range-tab">';
+        foreach ($groups as $group) {
+            echo '<h3 class="dd-range-group-title">' . esc_html($group['title']) . '</h3>';
+            $this->render_range_table($group['product_ids']);
+        }
+        echo '</div>';
+    }
+
+    /**
+     * Build the Product Range groups for a product, grouped by product category.
+     *
+     * Scopes to the product's deepest (most specific) product_cat terms so the table
+     * reflects the series (e.g. the "New Preferred" / "Extended" child categories) and
+     * not a broad parent taxonomy like "Power over Ethernet (PoE)". Each returned group
+     * is ['title' => leaf category name, 'product_ids' => [...]].
+     */
+    private function get_range_groups($product_id)
+    {
+        $terms = get_the_terms($product_id, 'product_cat');
+        if (empty($terms) || is_wp_error($terms)) return [];
+
+        $max_depth = 0;
+        $depths    = [];
+        foreach ($terms as $term) {
+            $depth = count(get_ancestors($term->term_id, 'product_cat'));
+            $depths[$term->term_id] = $depth;
+            if ($depth > $max_depth) $max_depth = $depth;
+        }
+
+        $groups = [];
+        foreach ($terms as $term) {
+            if ($depths[$term->term_id] < $max_depth) continue;
+
+            $product_ids = get_posts([
+                'post_type'   => 'product',
+                'post_status' => 'publish',
+                'numberposts' => -1,
+                'orderby'     => 'menu_order title',
+                'order'       => 'ASC',
+                'fields'      => 'ids',
+                'tax_query'   => [[
+                    'taxonomy' => 'product_cat',
+                    'field'    => 'term_id',
+                    'terms'    => $term->term_id,
+                ]],
+            ]);
+
+            if (! empty($product_ids)) {
+                $groups[] = ['title' => $term->name, 'product_ids' => $product_ids];
+            }
+        }
+
+        return $groups;
+    }
+
+    private function render_range_table($product_ids)
+    {
+        $products = [];
+        foreach ($product_ids as $pid) {
+            $p = wc_get_product($pid);
+            if ($p) $products[] = $p;
+        }
+        if (empty($products)) return;
+
+        // Union of visible attribute labels, preserving first-seen order, for the columns.
+        $attr_labels = [];
+        foreach ($products as $p) {
+            foreach ($p->get_attributes() as $attr_key => $attr) {
+                if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) continue;
+                $attr_labels[$attr_key] = wc_attribute_label($attr_key, $p);
+            }
+        }
+
+        echo '<table class="dd-range-table"><thead><tr>';
+        echo '<th>' . esc_html__('Part Number', 'silvertell-wc-customisation') . '</th>';
+        foreach ($attr_labels as $label) {
+            echo '<th>' . esc_html($label) . '</th>';
+        }
+        echo '<th>' . esc_html__('Buy Samples', 'silvertell-wc-customisation') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($products as $p) {
+            $pid = $p->get_id();
+            echo '<tr>';
+            echo '<td class="dd-range-name"><a href="' . esc_url(get_permalink($pid)) . '">' . esc_html($p->get_name()) . '</a></td>';
+            foreach (array_keys($attr_labels) as $attr_key) {
+                $val = $p->get_attribute($attr_key);
+                echo '<td>' . ($val !== '' ? esc_html($val) : '&mdash;') . '</td>';
+            }
+            $buttons = $this->render_provider_buttons($pid);
+            echo '<td class="dd-range-buy">' . ($buttons ?: '&mdash;') . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+    }
+
+    /**
+     * Output the distributor "buy" links for a post (product or eval board), driven by
+     * the dynamic sample-provider config. Returns a string (empty when none are set).
+     */
+    private function render_provider_buttons($post_id)
+    {
+        $out = '';
+        foreach ($this->get_sample_providers() as $provider) {
+            $url = get_post_meta($post_id, $provider['meta_key'], true);
+            if (empty($url)) continue;
+
+            $logo     = isset($provider['logo']) ? $provider['logo'] : '';
+            $logo_url = is_numeric($logo) ? wp_get_attachment_image_url($logo, 'thumbnail') : $logo;
+            $inner    = $logo_url
+                ? '<img src="' . esc_url($logo_url) . '" alt="' . esc_attr($provider['name']) . '" />'
+                : esc_html($provider['name']);
+
+            $out .= '<a class="dd-buy-btn" href="' . esc_url($url) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($provider['name']) . '">' . $inner . '</a>';
+        }
+        return $out;
+    }
+
+    public function inject_frontend_assets()
+    {
+        if (! function_exists('is_product') || ! is_product()) return;
+    ?>
+        <style>
+            .dd-tab-content {
+                margin: 0 0 10px;
+            }
+
+            .dd-feature-list,
+            .dd-doc-list {
+                margin: 0 0 15px 20px;
+                padding: 0;
+            }
+
+            .dd-feature-list li,
+            .dd-doc-list li {
+                margin-bottom: 8px;
+            }
+
+            .dd-doc-group-title,
+            .dd-range-group-title,
+            .dd-eb-group-title {
+                margin: 25px 0 12px;
+                font-size: 18px;
+            }
+
+            .dd-doc-group-title:first-child,
+            .dd-range-group-title:first-child {
+                margin-top: 0;
+            }
+
+            .dd-range-table,
+            .dd-eb-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 25px;
+            }
+
+            .dd-range-table th,
+            .dd-range-table td,
+            .dd-eb-table td {
+                border: 1px solid #e0e0e0;
+                padding: 10px 12px;
+                text-align: left;
+                vertical-align: middle;
+                font-size: 14px;
+            }
+
+            .dd-range-table thead th {
+                background: #f6f7f7;
+                font-weight: 600;
+            }
+
+            .dd-buy-btn {
+                display: inline-block;
+                margin: 2px 6px 2px 0;
+                padding: 5px 12px;
+                background: #2271b1;
+                color: #fff;
+                border-radius: 4px;
+                font-size: 13px;
+                line-height: 1.4;
+                text-decoration: none;
+            }
+
+            .dd-buy-btn:hover {
+                background: #135e96;
+                color: #fff;
+            }
+
+            .dd-buy-btn img {
+                max-height: 22px;
+                width: auto;
+                display: block;
+            }
+
+            .dd-eb-card {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 25px;
+                margin-bottom: 30px;
+                align-items: flex-start;
+            }
+
+            .dd-eb-image-wrap {
+                flex: 0 0 240px;
+                max-width: 240px;
+            }
+
+            .dd-eb-image-wrap img {
+                max-width: 100%;
+                height: auto;
+            }
+
+            .dd-eb-body {
+                flex: 1;
+                min-width: 280px;
+            }
+
+            .dd-eb-title {
+                margin-top: 0;
+            }
+
+            .dd-buy-wrap {
+                margin-top: 12px;
+            }
+        </style>
+    <?php
     }
 
     private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null, $post_id = null)

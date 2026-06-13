@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.33.0
+ * Version: 2.33.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1079,6 +1079,7 @@ class Silvertell_Woocommerce_Customisation
 
         $title   = $product ? $product->get_name() : '';
         $content = $product ? $product->get_description() : '';
+        $short   = $product ? $product->get_short_description() : '';
         $sku     = $product ? $product->get_sku() : '';
 
         ob_start();
@@ -1092,8 +1093,13 @@ class Silvertell_Woocommerce_Customisation
         </div>
 
         <div class="dd-modal-field">
-            <label><?php esc_html_e('Post Content', 'silvertell-wc-customisation'); ?></label>
+            <label><?php esc_html_e('Description', 'silvertell-wc-customisation'); ?></label>
             <textarea name="post_content" rows="4" class="dd-full-width"><?php echo esc_textarea($content); ?></textarea>
+        </div>
+
+        <div class="dd-modal-field">
+            <label><?php esc_html_e('Subtext', 'silvertell-wc-customisation'); ?></label>
+            <textarea name="post_excerpt" rows="3" class="dd-full-width"><?php echo esc_textarea($short); ?></textarea>
         </div>
 
         <div class="dd-modal-field">
@@ -1233,6 +1239,7 @@ class Silvertell_Woocommerce_Customisation
 
         $product->set_name(sanitize_text_field(wp_unslash($_POST['post_title'] ?? '')));
         $product->set_description(wp_kses_post(wp_unslash($_POST['post_content'] ?? '')));
+        $product->set_short_description(wp_kses_post(wp_unslash($_POST['post_excerpt'] ?? '')));
         $product->set_status('publish');
 
         if (! $child_id && $parent_id) {

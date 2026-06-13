@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.26.0
+ * Version: 2.27.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -18,6 +18,9 @@ if (! defined('ABSPATH')) {
  */
 class Silvertell_Woocommerce_Customisation
 {
+    /** @var array Per-request memo of build_product_range() results, keyed by product ID. */
+    private $range_cache = [];
+
     public function __construct()
     {
         $this->register_hooks();
@@ -846,7 +849,7 @@ class Silvertell_Woocommerce_Customisation
             ];
         }
 
-        if (! empty($this->get_range_groups($product_id))) {
+        if (! empty($this->build_product_range($product_id))) {
             $tabs['silvertell_product_range'] = [
                 'title'    => __('Product Range', 'silvertell-wc-customisation'),
                 'priority' => 20,
@@ -1054,69 +1057,185 @@ class Silvertell_Woocommerce_Customisation
         global $product;
         if (! $product instanceof WC_Product) return;
 
-        $groups = $this->get_range_groups($product->get_id());
-        if (empty($groups)) return;
+        $range = $this->build_product_range($product->get_id());
+        if (empty($range)) return;
 
         echo '<div class="dd-tab-content dd-product-range-tab">';
-        foreach ($groups as $group) {
-            echo '<h3 class="dd-range-group-title">' . esc_html($group['title']) . '</h3>';
-            $this->render_range_table($group['product_ids']);
+
+        if (! empty($range['groups'])) {
+            $labels = array_keys($range['groups']);
+            $has_subtabs = (count($labels) > 1) || ($labels !== ['']);
+
+            if ($has_subtabs) {
+                $this->render_range_subtabs($range['groups']);
+            } else {
+                foreach ($range['groups'][''] as $section) {
+                    $this->render_range_section($section);
+                }
+            }
+        }
+
+        if (! empty($range['flat'])) {
+            $this->render_range_table($range['flat']);
+        }
+
+        echo '</div>';
+    }
+
+    /**
+     * Build the Product Range structure from the post_parent hierarchy.
+     *
+     * The `Parent` CSV column (a SKU) is imported as the product's post_parent, giving up
+     * to three levels:
+     *   L1  the viewed product (e.g. Ag9900)
+     *   L2  sub-range "group" products (e.g. Ag9900-MTB) — a heading + description, tagged
+     *       with a "Product Range > X" category that becomes the sub-tab (New Preferred /
+     *       Extended Range)
+     *   L3  orderable variants (e.g. Ag9924-MTB) — the table rows, with visible attributes
+     *       and distributor buy links
+     *
+     * Returns ['groups' => [subtab_label => [section, ...]], 'flat' => [variant posts]] or
+     * null when there is nothing to show. A "section" is
+     * ['title', 'description', 'note', 'variants']. Products whose children are variants
+     * directly (2-level, e.g. Ag9700) populate 'flat'; a childless product that has its own
+     * attributes/buy links renders itself as a single flat row.
+     */
+    private function build_product_range($product_id)
+    {
+        if (isset($this->range_cache[$product_id])) {
+            return $this->range_cache[$product_id];
+        }
+
+        $children = $this->get_child_products($product_id);
+
+        $groups = [];
+        $flat   = [];
+
+        if (! empty($children)) {
+            foreach ($children as $child) {
+                $grandchildren = $this->get_child_products($child->ID);
+
+                if (! empty($grandchildren)) {
+                    $label = $this->get_product_range_subcategory($child->ID);
+                    $groups[$label][] = [
+                        'title'       => $child->post_title,
+                        'description' => $child->post_content,
+                        'note'        => $child->post_excerpt,
+                        'variants'    => $grandchildren,
+                    ];
+                } else {
+                    $flat[] = $child;
+                }
+            }
+        } else {
+            // Standalone product (no children): show itself if it carries spec/buy data.
+            $self = wc_get_product($product_id);
+            if ($self && ($this->product_has_visible_attributes($self) || $this->render_provider_buttons($product_id) !== '')) {
+                $flat[] = get_post($product_id);
+            }
+        }
+
+        $range = (empty($groups) && empty($flat)) ? null : ['groups' => $groups, 'flat' => $flat];
+        $this->range_cache[$product_id] = $range;
+        return $range;
+    }
+
+    /**
+     * Published child products of a post, ordered by menu order then import order (ID) so
+     * the CSV row order (e.g. 24V, 12V, 5V, 3V) is preserved.
+     */
+    private function get_child_products($parent_id)
+    {
+        return get_posts([
+            'post_type'   => 'product',
+            'post_status' => 'publish',
+            'post_parent' => $parent_id,
+            'numberposts' => -1,
+            'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
+        ]);
+    }
+
+    /**
+     * The sub-range product's child category under "Product Range" (e.g. "New Preferred
+     * Range" / "Extended Range"), used as the Product Range sub-tab label. Empty when none.
+     */
+    private function get_product_range_subcategory($product_id)
+    {
+        $terms = get_the_terms($product_id, 'product_cat');
+        if (empty($terms) || is_wp_error($terms)) return '';
+
+        $parent_term = get_term_by('name', 'Product Range', 'product_cat');
+        if ($parent_term) {
+            foreach ($terms as $term) {
+                if ((int) $term->parent === (int) $parent_term->term_id) {
+                    return $term->name;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function product_has_visible_attributes($product)
+    {
+        foreach ($product->get_attributes() as $attr) {
+            if (! is_object($attr) || ! method_exists($attr, 'get_visible') || $attr->get_visible()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function render_range_subtabs($groups)
+    {
+        $uid = 'dd-range-' . uniqid();
+        echo '<div class="dd-range-tabs" id="' . esc_attr($uid) . '">';
+
+        echo '<ul class="dd-range-nav">';
+        $first = true;
+        foreach ($groups as $label => $sections) {
+            $display = $label !== '' ? $label : __('Range', 'silvertell-wc-customisation');
+            echo '<li class="dd-range-nav-item' . ($first ? ' active' : '') . '" data-target="' . esc_attr(sanitize_title($label)) . '">' . esc_html($display) . '</li>';
+            $first = false;
+        }
+        echo '</ul>';
+
+        $first = true;
+        foreach ($groups as $label => $sections) {
+            echo '<div class="dd-range-panel' . ($first ? ' active' : '') . '" data-panel="' . esc_attr(sanitize_title($label)) . '">';
+            foreach ($sections as $section) {
+                $this->render_range_section($section);
+            }
+            echo '</div>';
+            $first = false;
+        }
+
+        echo '</div>';
+    }
+
+    private function render_range_section($section)
+    {
+        echo '<div class="dd-range-section">';
+        echo '<h3 class="dd-range-title">' . esc_html($section['title']) . '</h3>';
+        if (trim($section['description']) !== '') {
+            echo '<div class="dd-range-desc">' . wp_kses_post(wpautop($section['description'])) . '</div>';
+        }
+        $this->render_range_table($section['variants']);
+        if (trim($section['note']) !== '') {
+            echo '<p class="dd-range-note">' . esc_html($section['note']) . '</p>';
         }
         echo '</div>';
     }
 
     /**
-     * Build the Product Range groups for a product, grouped by product category.
-     *
-     * Scopes to the product's deepest (most specific) product_cat terms so the table
-     * reflects the series (e.g. the "New Preferred" / "Extended" child categories) and
-     * not a broad parent taxonomy like "Power over Ethernet (PoE)". Each returned group
-     * is ['title' => leaf category name, 'product_ids' => [...]].
+     * Render a variant table. Accepts an array of WP_Post objects or product IDs. Columns
+     * are the union of the variants' visible attributes, plus a Buy Samples column.
      */
-    private function get_range_groups($product_id)
-    {
-        $terms = get_the_terms($product_id, 'product_cat');
-        if (empty($terms) || is_wp_error($terms)) return [];
-
-        $max_depth = 0;
-        $depths    = [];
-        foreach ($terms as $term) {
-            $depth = count(get_ancestors($term->term_id, 'product_cat'));
-            $depths[$term->term_id] = $depth;
-            if ($depth > $max_depth) $max_depth = $depth;
-        }
-
-        $groups = [];
-        foreach ($terms as $term) {
-            if ($depths[$term->term_id] < $max_depth) continue;
-
-            $product_ids = get_posts([
-                'post_type'   => 'product',
-                'post_status' => 'publish',
-                'numberposts' => -1,
-                'orderby'     => 'menu_order title',
-                'order'       => 'ASC',
-                'fields'      => 'ids',
-                'tax_query'   => [[
-                    'taxonomy' => 'product_cat',
-                    'field'    => 'term_id',
-                    'terms'    => $term->term_id,
-                ]],
-            ]);
-
-            if (! empty($product_ids)) {
-                $groups[] = ['title' => $term->name, 'product_ids' => $product_ids];
-            }
-        }
-
-        return $groups;
-    }
-
-    private function render_range_table($product_ids)
+    private function render_range_table($variants)
     {
         $products = [];
-        foreach ($product_ids as $pid) {
-            $p = wc_get_product($pid);
+        foreach ($variants as $v) {
+            $pid = is_object($v) ? $v->ID : (int) $v;
+            $p   = wc_get_product($pid);
             if ($p) $products[] = $p;
         }
         if (empty($products)) return;
@@ -1126,7 +1245,8 @@ class Silvertell_Woocommerce_Customisation
         foreach ($products as $p) {
             foreach ($p->get_attributes() as $attr_key => $attr) {
                 if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) continue;
-                $attr_labels[$attr_key] = wc_attribute_label($attr_key, $p);
+                $name = (is_object($attr) && method_exists($attr, 'get_name')) ? $attr->get_name() : $attr_key;
+                $attr_labels[$attr_key] = wc_attribute_label($name, $p);
             }
         }
 
@@ -1141,7 +1261,7 @@ class Silvertell_Woocommerce_Customisation
         foreach ($products as $p) {
             $pid = $p->get_id();
             echo '<tr>';
-            echo '<td class="dd-range-name"><a href="' . esc_url(get_permalink($pid)) . '">' . esc_html($p->get_name()) . '</a></td>';
+            echo '<td class="dd-range-name">' . esc_html($p->get_name()) . '</td>';
             foreach (array_keys($attr_labels) as $attr_key) {
                 $val = $p->get_attribute($attr_key);
                 echo '<td>' . ($val !== '' ? esc_html($val) : '&mdash;') . '</td>';
@@ -1343,6 +1463,60 @@ class Silvertell_Woocommerce_Customisation
             .dd-buy-wrap {
                 margin-top: 12px;
             }
+
+            .dd-range-nav {
+                list-style: none;
+                margin: 0 0 25px;
+                padding: 0;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                border-bottom: 1px solid #e0e0e0;
+            }
+
+            .dd-range-nav-item {
+                cursor: pointer;
+                padding: 10px 18px;
+                font-weight: 600;
+                text-transform: uppercase;
+                font-size: 14px;
+                color: #50575e;
+                border-bottom: 2px solid transparent;
+                margin-bottom: -1px;
+            }
+
+            .dd-range-nav-item.active {
+                color: #2271b1;
+                border-bottom-color: #2271b1;
+            }
+
+            .dd-range-panel {
+                display: none;
+            }
+
+            .dd-range-panel.active {
+                display: block;
+            }
+
+            .dd-range-section {
+                margin-bottom: 35px;
+            }
+
+            .dd-range-title {
+                margin: 0 0 5px;
+            }
+
+            .dd-range-desc {
+                color: #50575e;
+                margin-bottom: 15px;
+            }
+
+            .dd-range-note {
+                color: #787c82;
+                font-style: italic;
+                font-size: 13px;
+                margin-top: 8px;
+            }
         </style>
         <script>
             /* Lightweight tab switcher: ensures only the active panel is shown.
@@ -1370,6 +1544,22 @@ class Silvertell_Woocommerce_Customisation
                         $tabs.on('click', function (e) {
                             e.preventDefault();
                             activate($(this));
+                        });
+                    });
+
+                    // Product Range sub-tabs (New Preferred Range / Extended Range).
+                    $('.dd-range-tabs').each(function () {
+                        var $wrap   = $(this);
+                        var $nav    = $wrap.find('.dd-range-nav-item');
+                        var $panels = $wrap.find('.dd-range-panel');
+
+                        $nav.on('click', function () {
+                            var target = $(this).data('target');
+                            $nav.removeClass('active');
+                            $(this).addClass('active');
+                            $panels.each(function () {
+                                $(this).toggleClass('active', String($(this).data('panel')) === String(target));
+                            });
                         });
                     });
                 });

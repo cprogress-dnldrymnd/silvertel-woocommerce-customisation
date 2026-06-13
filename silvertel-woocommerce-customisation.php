@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.32.0
+ * Version: 2.32.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -71,8 +71,10 @@ class Silvertell_Woocommerce_Customisation
 
         // Admin Products list: hide child products (sub-range groups / variants). They are
         // managed inside their parent product's edit screen via the "Child Products" meta
-        // box below, not as standalone rows in the list.
+        // box below, not as standalone rows in the list. Also keep them out of the status
+        // counts (All / Published / Trash) shown above the list.
         add_action('pre_get_posts', [$this, 'hide_child_products_from_list']);
+        add_filter('wp_count_posts', [$this, 'exclude_children_from_count'], 10, 2);
 
         // Child Products manager on the product edit screen (tree list + add/delete + a
         // popup editor for Title / Content / Categories / SKU / Attributes / Buy Samples).
@@ -956,6 +958,36 @@ class Silvertell_Woocommerce_Customisation
         $query->set('post_parent', 0);
     }
 
+    /**
+     * On the Products list screen, recompute the per-status counts (All / Published /
+     * Trash …) to count only top-level products, matching the hidden-children list.
+     */
+    public function exclude_children_from_count($counts, $type)
+    {
+        if ($type !== 'product' || ! is_admin()) return $counts;
+        if (($GLOBALS['pagenow'] ?? '') !== 'edit.php' || ($_GET['post_type'] ?? '') !== 'product') return $counts;
+
+        global $wpdb;
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT post_status, COUNT(*) AS num FROM {$wpdb->posts} WHERE post_type = %s AND post_parent = 0 GROUP BY post_status",
+                $type
+            ),
+            ARRAY_A
+        );
+
+        $map = [];
+        foreach ($rows as $row) {
+            $map[$row['post_status']] = (int) $row['num'];
+        }
+
+        foreach ($counts as $status => $value) {
+            $counts->$status = isset($map[$status]) ? $map[$status] : 0;
+        }
+
+        return $counts;
+    }
+
     // ==============================================================================
     // CHILD PRODUCTS MANAGER (parent edit screen + popup editor)
     // ==============================================================================
@@ -1200,7 +1232,8 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * AJAX: trash a child product (and its descendants), then return the refreshed list.
+     * AJAX: permanently delete a child product (and its descendants), then return the
+     * refreshed list.
      */
     public function ajax_child_delete()
     {
@@ -1211,15 +1244,16 @@ class Silvertell_Woocommerce_Customisation
         $root     = isset($_POST['root']) ? absint($_POST['root']) : 0;
         if (! $child_id) wp_send_json_error(['message' => 'no_id']);
 
-        $this->trash_product_branch($child_id);
+        $this->delete_product_branch($child_id);
 
         wp_send_json_success(['list' => $this->render_child_products_list($root)]);
     }
 
     /**
-     * Trash a product and all of its descendant products (depth-first) so none are orphaned.
+     * Permanently delete a product and all of its descendant products (depth-first) so
+     * none are left orphaned.
      */
-    private function trash_product_branch($product_id)
+    private function delete_product_branch($product_id)
     {
         $children = get_children([
             'post_parent' => $product_id,
@@ -1229,9 +1263,9 @@ class Silvertell_Woocommerce_Customisation
             'fields'      => 'ids',
         ]);
         foreach ($children as $cid) {
-            $this->trash_product_branch($cid);
+            $this->delete_product_branch($cid);
         }
-        wp_trash_post($product_id);
+        wp_delete_post($product_id, true);
     }
 
     /**
@@ -1316,7 +1350,7 @@ class Silvertell_Woocommerce_Customisation
                     openModal(0, $(this).data('parent'), '<?php echo esc_js(__('Add Child Product', 'silvertell-wc-customisation')); ?>');
                 });
                 $manager.on('click', '.dd-child-delete', function() {
-                    if (!confirm('<?php echo esc_js(__('Delete this child product and its sub-items?', 'silvertell-wc-customisation')); ?>')) return;
+                    if (!confirm('<?php echo esc_js(__('Permanently delete this child product and its sub-items? This cannot be undone.', 'silvertell-wc-customisation')); ?>')) return;
                     $.post(ajaxurl, { action: 'silvertell_child_delete', nonce: nonce, id: $(this).data('id'), root: rootParent }, function(res) {
                         if (res && res.success) $('.dd-child-list-wrap').html(res.data.list);
                     });

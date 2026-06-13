@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.31.0
+ * Version: 2.31.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -74,10 +74,11 @@ class Silvertell_Woocommerce_Customisation
 
         // Admin Products list: display the post_parent relationship as an indented tree
         // (like the hierarchical Evaluation Board list) instead of WooCommerce's flat
-        // "← parent" arrow.
+        // "← parent" arrow. The reorder groups children under parents; a footer script
+        // adds the em-dash indent (kept out of the stored title so Quick Edit is safe).
         add_action('pre_get_posts', [$this, 'hierarchical_product_list_query']);
         add_filter('the_posts', [$this, 'hierarchical_product_list_rows'], 10, 2);
-        add_filter('the_title', [$this, 'hierarchical_product_list_title'], 10, 2);
+        add_action('admin_footer-edit.php', [$this, 'print_product_tree_indent']);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -942,66 +943,107 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Paginate the Products list by top-level products only, so each parent and all of
-     * its descendants stay together on one page (mirrors core's hierarchical lists).
+     * Show every product on one page, ordered by title, so the reorder pass can group
+     * each parent with its children. We deliberately do NOT filter the query (e.g. by
+     * post_parent) — that previously hid the children entirely — we only reorder.
      */
     public function hierarchical_product_list_query($query)
     {
         if (! $this->is_plain_product_list_query($query)) return;
 
-        $query->set('post_parent', 0);
-        $query->set('orderby', 'menu_order title');
+        $query->set('orderby', 'title');
         $query->set('order', 'ASC');
+        $query->set('posts_per_page', -1);
     }
 
     /**
-     * Splice each top-level product's descendants in directly beneath it, recording the
-     * depth of every row for hierarchical_product_list_title().
+     * Reorder the fetched products into a parent → children tree (depth-first), without
+     * adding or removing any rows, and record each row's depth for the title indent.
+     * Children whose parent isn't in the set stay where they are, so nothing is dropped.
      */
     public function hierarchical_product_list_rows($posts, $query)
     {
-        if (! $this->is_plain_product_list_query($query) || empty($posts)) return $posts;
+        if (! $this->is_plain_product_list_query($query) || count($posts) < 2) return $posts;
+
+        // Group posts by their parent ID and note which IDs are present in this set.
+        $children_by_parent = [];
+        $present = [];
+        foreach ($posts as $post) {
+            $children_by_parent[(int) $post->post_parent][] = $post;
+            $present[(int) $post->ID] = true;
+        }
 
         $this->product_list_depths = [];
-        $ordered = [];
-        foreach ($posts as $top) {
-            $this->append_product_branch($top, 0, $ordered);
+        $ordered  = [];
+        $emitted  = [];
+
+        foreach ($posts as $post) {
+            // A "root" is a top-level product, or one whose parent isn't on this list.
+            $parent_id = (int) $post->post_parent;
+            if ($parent_id === 0 || empty($present[$parent_id])) {
+                $this->append_product_branch($post, 0, $children_by_parent, $ordered, $emitted);
+            }
+        }
+
+        // Safety net: append anything not yet emitted (e.g. a parent/child cycle).
+        foreach ($posts as $post) {
+            if (empty($emitted[(int) $post->ID])) $ordered[] = $post;
         }
 
         return $ordered;
     }
 
     /**
-     * Recursively append a product and its child products to $ordered, depth-first.
+     * Append a product then, depth-first, each of its children already present in the set.
      */
-    private function append_product_branch($post, $depth, &$ordered)
+    private function append_product_branch($post, $depth, $children_by_parent, &$ordered, &$emitted)
     {
+        $id = (int) $post->ID;
+        if (! empty($emitted[$id])) return; // guard against cycles
+        $emitted[$id] = true;
+
         $ordered[] = $post;
-        $this->product_list_depths[$post->ID] = $depth;
+        $this->product_list_depths[$id] = $depth;
 
-        $children = get_children([
-            'post_parent' => $post->ID,
-            'post_type'   => 'product',
-            'post_status' => ['publish', 'pending', 'draft', 'future', 'private'],
-            'orderby'     => 'menu_order title',
-            'order'       => 'ASC',
-            'numberposts' => -1,
-        ]);
-
-        foreach ($children as $child) {
-            $this->append_product_branch($child, $depth + 1, $ordered);
+        if (! empty($children_by_parent[$id])) {
+            foreach ($children_by_parent[$id] as $child) {
+                $this->append_product_branch($child, $depth + 1, $children_by_parent, $ordered, $emitted);
+            }
         }
     }
 
     /**
-     * Prefix child product titles in the admin list with em-dashes to show their depth,
-     * exactly like WordPress' native hierarchical post lists.
+     * Print a small script that prepends em-dashes to each child product's title in the
+     * list, indenting it by depth — purely visual, so the stored title (and Quick Edit)
+     * is never touched. Uses the depth map built during the reorder pass.
      */
-    public function hierarchical_product_list_title($title, $post_id = 0)
+    public function print_product_tree_indent()
     {
-        if (empty($this->product_list_depths[$post_id])) return $title;
+        if (empty($this->product_list_depths)) return;
 
-        return str_repeat('— ', (int) $this->product_list_depths[$post_id]) . $title;
+        $map = [];
+        foreach ($this->product_list_depths as $id => $depth) {
+            if ($depth > 0) $map[$id] = (int) $depth;
+        }
+        if (empty($map)) return;
+?>
+        <script>
+            (function() {
+                var depths = <?php echo wp_json_encode($map); ?>;
+                Object.keys(depths).forEach(function(id) {
+                    var row = document.getElementById('post-' + id);
+                    if (!row) return;
+                    var link = row.querySelector('.column-name .row-title, .column-name strong a, .row-title, .column-title strong a');
+                    if (!link || link.previousElementSibling && link.previousElementSibling.classList.contains('dd-tree-indent')) return;
+                    var prefix = document.createElement('span');
+                    prefix.className = 'dd-tree-indent';
+                    prefix.style.color = '#a0a5aa';
+                    prefix.textContent = new Array(depths[id] + 1).join('— ');
+                    link.parentNode.insertBefore(prefix, link);
+                });
+            })();
+        </script>
+<?php
     }
 
     /**

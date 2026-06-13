@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.27.0
+ * Version: 2.28.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -61,6 +61,10 @@ class Silvertell_Woocommerce_Customisation
         // Frontend Single Product Tabs (rendered by the native WC tabs / Elementor Product Data Tabs widget)
         add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs']);
         add_action('wp_footer', [$this, 'inject_frontend_assets']);
+
+        // Child products (sub-range groups / variants) live inside their parent's page,
+        // so they must not be reachable as standalone single pages.
+        add_action('template_redirect', [$this, 'redirect_child_product_pages']);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -875,6 +879,28 @@ class Silvertell_Woocommerce_Customisation
         }
 
         return $tabs;
+    }
+
+    /**
+     * A simple product with a parent is a sub-range group or variant whose content is
+     * surfaced inside its top-level product's tabs, so it has no page of its own. Redirect
+     * any direct hit on such a URL to the top-level ancestor product (301).
+     */
+    public function redirect_child_product_pages()
+    {
+        if (is_admin() || ! is_singular('product')) return;
+
+        $post = get_queried_object();
+        if (! $post instanceof WP_Post || empty($post->post_parent)) return;
+
+        $ancestors = get_post_ancestors($post->ID); // immediate parent ... top-most
+        $top_id    = ! empty($ancestors) ? end($ancestors) : (int) $post->post_parent;
+
+        $url = get_permalink($top_id);
+        if ($url) {
+            wp_safe_redirect($url, 301);
+            exit;
+        }
     }
 
     /**

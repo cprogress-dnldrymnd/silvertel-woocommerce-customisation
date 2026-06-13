@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.30.0
+ * Version: 2.31.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -20,6 +20,9 @@ class Silvertell_Woocommerce_Customisation
 {
     /** @var array Per-request memo of build_product_range() results, keyed by product ID. */
     private $range_cache = [];
+
+    /** @var array Admin products-list depth per product ID, set while rendering the hierarchical list. */
+    private $product_list_depths = [];
 
     public function __construct()
     {
@@ -68,6 +71,13 @@ class Silvertell_Woocommerce_Customisation
         // Child products (sub-range groups / variants) live inside their parent's page,
         // so they must not be reachable as standalone single pages.
         add_action('template_redirect', [$this, 'redirect_child_product_pages']);
+
+        // Admin Products list: display the post_parent relationship as an indented tree
+        // (like the hierarchical Evaluation Board list) instead of WooCommerce's flat
+        // "← parent" arrow.
+        add_action('pre_get_posts', [$this, 'hierarchical_product_list_query']);
+        add_filter('the_posts', [$this, 'hierarchical_product_list_rows'], 10, 2);
+        add_filter('the_title', [$this, 'hierarchical_product_list_title'], 10, 2);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -906,6 +916,92 @@ class Silvertell_Woocommerce_Customisation
             wp_safe_redirect($url, 301);
             exit;
         }
+    }
+
+    // ==============================================================================
+    // ADMIN PRODUCTS LIST — HIERARCHICAL (INDENTED) DISPLAY
+    // ==============================================================================
+
+    /**
+     * Is the supplied query the main admin Products list, viewed plainly (no search,
+     * filter or custom sort)? Only then do we override it into a hierarchical tree —
+     * any active search/filter/sort should keep WooCommerce's normal flat results.
+     */
+    private function is_plain_product_list_query($query)
+    {
+        if (! is_admin() || ! $query instanceof WP_Query || ! $query->is_main_query()) return false;
+        if (($GLOBALS['pagenow'] ?? '') !== 'edit.php') return false;
+        if (($_GET['post_type'] ?? '') !== 'product') return false;
+
+        // Bail out if the user is searching, filtering or sorting — show flat results.
+        foreach (['s', 'orderby', 'product_cat', 'product_type', 'product_brand', 'stock_status'] as $key) {
+            if (! empty($_GET[$key])) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Paginate the Products list by top-level products only, so each parent and all of
+     * its descendants stay together on one page (mirrors core's hierarchical lists).
+     */
+    public function hierarchical_product_list_query($query)
+    {
+        if (! $this->is_plain_product_list_query($query)) return;
+
+        $query->set('post_parent', 0);
+        $query->set('orderby', 'menu_order title');
+        $query->set('order', 'ASC');
+    }
+
+    /**
+     * Splice each top-level product's descendants in directly beneath it, recording the
+     * depth of every row for hierarchical_product_list_title().
+     */
+    public function hierarchical_product_list_rows($posts, $query)
+    {
+        if (! $this->is_plain_product_list_query($query) || empty($posts)) return $posts;
+
+        $this->product_list_depths = [];
+        $ordered = [];
+        foreach ($posts as $top) {
+            $this->append_product_branch($top, 0, $ordered);
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Recursively append a product and its child products to $ordered, depth-first.
+     */
+    private function append_product_branch($post, $depth, &$ordered)
+    {
+        $ordered[] = $post;
+        $this->product_list_depths[$post->ID] = $depth;
+
+        $children = get_children([
+            'post_parent' => $post->ID,
+            'post_type'   => 'product',
+            'post_status' => ['publish', 'pending', 'draft', 'future', 'private'],
+            'orderby'     => 'menu_order title',
+            'order'       => 'ASC',
+            'numberposts' => -1,
+        ]);
+
+        foreach ($children as $child) {
+            $this->append_product_branch($child, $depth + 1, $ordered);
+        }
+    }
+
+    /**
+     * Prefix child product titles in the admin list with em-dashes to show their depth,
+     * exactly like WordPress' native hierarchical post lists.
+     */
+    public function hierarchical_product_list_title($title, $post_id = 0)
+    {
+        if (empty($this->product_list_depths[$post_id])) return $title;
+
+        return str_repeat('— ', (int) $this->product_list_depths[$post_id]) . $title;
     }
 
     /**

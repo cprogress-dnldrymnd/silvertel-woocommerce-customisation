@@ -1151,10 +1151,14 @@ class Silvertell_Woocommerce_Customisation
         wp_send_json_success(['html' => ob_get_clean()]);
     }
 
-    /**
+  /**
      * Render one attribute row: a global-attribute (taxonomy) selector with a multi-select
-     * of its terms, plus name/value inputs used when "Custom" is chosen. $index keys the
-     * row in the posted attrs[] array ('__INDEX__' for the JS clone template).
+     * of its terms, plus name/value inputs used when "Custom" is chosen.
+     * * @param string|int $index The array index for the posted attrs array.
+     * @param string $tax The taxonomy slug if global.
+     * @param string $name The custom attribute name.
+     * @param string $value The custom attribute values (pipe separated).
+     * @param array $selected_terms Array of term IDs.
      */
     private function render_child_attr_row($index, $tax = '', $name = '', $value = '', $selected_terms = [])
     {
@@ -1164,27 +1168,41 @@ class Silvertell_Woocommerce_Customisation
         $base           = 'attrs[' . $index . ']';
         ?>
         <div class="dd-attr-row">
-            <select name="<?php echo esc_attr($base); ?>[tax]" class="dd-attr-tax">
-                <option value=""><?php esc_html_e('— Custom —', 'silvertell-wc-customisation'); ?></option>
-                <?php foreach ($choices as $slug => $label) : ?>
-                    <option value="<?php echo esc_attr($slug); ?>" <?php selected($tax, $slug); ?>><?php echo esc_html($label); ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="text" name="<?php echo esc_attr($base); ?>[name]" class="dd-attr-name" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
-            <input type="text" name="<?php echo esc_attr($base); ?>[value]" class="dd-attr-value" placeholder="<?php esc_attr_e('Value', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
-            <select name="<?php echo esc_attr($base); ?>[terms][]" class="dd-attr-terms" multiple<?php echo $is_global ? '' : ' style="display:none;"'; ?>>
-                <?php
-                if ($is_global) {
-                    $terms = get_terms(['taxonomy' => $tax, 'hide_empty' => false]);
-                    if (! is_wp_error($terms)) {
-                        foreach ($terms as $term) {
-                            echo '<option value="' . esc_attr($term->term_id) . '" ' . selected(in_array((int) $term->term_id, $selected_terms, true), true, false) . '>' . esc_html($term->name) . '</option>';
+            <div class="dd-attr-head">
+                <select name="<?php echo esc_attr($base); ?>[tax]" class="dd-attr-tax">
+                    <option value=""><?php esc_html_e('— Custom —', 'silvertell-wc-customisation'); ?></option>
+                    <?php foreach ($choices as $slug => $label) : ?>
+                        <option value="<?php echo esc_attr($slug); ?>" <?php selected($tax, $slug); ?>><?php echo esc_html($label); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input type="text" name="<?php echo esc_attr($base); ?>[name]" class="dd-attr-name" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
+                <button type="button" class="button dd-attr-del" title="<?php esc_attr_e('Remove', 'silvertell-wc-customisation'); ?>">
+                    <span class="dashicons dashicons-trash" style="margin-top: 3px;"></span>
+                </button>
+            </div>
+            <div class="dd-attr-body">
+                <input type="text" name="<?php echo esc_attr($base); ?>[value]" class="dd-attr-value" placeholder="<?php esc_attr_e('Value (use | for multiple)', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
+                <div class="dd-attr-value-global"<?php echo $is_global ? '' : ' style="display:none;"'; ?>>
+                    <label class="dd-attr-value-label"><?php esc_html_e('Value(s):', 'silvertell-wc-customisation'); ?></label>
+                    <select name="<?php echo esc_attr($base); ?>[terms][]" class="dd-attr-terms" multiple data-placeholder="<?php esc_attr_e('Select values', 'silvertell-wc-customisation'); ?>">
+                        <?php
+                        if ($is_global) {
+                            $terms = get_terms(['taxonomy' => $tax, 'hide_empty' => false]);
+                            if (! is_wp_error($terms)) {
+                                foreach ($terms as $term) {
+                                    echo '<option value="' . esc_attr($term->term_id) . '" ' . selected(in_array((int) $term->term_id, $selected_terms, true), true, false) . '>' . esc_html($term->name) . '</option>';
+                                }
+                            }
                         }
-                    }
-                }
-                ?>
-            </select>
-            <button type="button" class="button dd-attr-del">&times;</button>
+                        ?>
+                    </select>
+                    <div class="dd-attr-term-actions">
+                        <button type="button" class="button dd-attr-select-all"><?php esc_html_e('Select all', 'silvertell-wc-customisation'); ?></button>
+                        <button type="button" class="button dd-attr-select-none"><?php esc_html_e('Select none', 'silvertell-wc-customisation'); ?></button>
+                        <button type="button" class="button button-primary dd-attr-create"><?php esc_html_e('Create value', 'silvertell-wc-customisation'); ?></button>
+                    </div>
+                </div>
+            </div>
         </div>
         <?php
     }
@@ -1361,59 +1379,263 @@ class Silvertell_Woocommerce_Customisation
         wp_delete_post($product_id, true);
     }
 
-   /**
-     * Render one attribute row: a global-attribute (taxonomy) selector with a multi-select
-     * of its terms, plus name/value inputs used when "Custom" is chosen.
-     * * @param string|int $index The array index for the posted attrs array.
-     * @param string $tax The taxonomy slug if global.
-     * @param string $name The custom attribute name.
-     * @param string $value The custom attribute values (pipe separated).
-     * @param array $selected_terms Array of term IDs.
+  /**
+     * Print the shared popup markup, styles and behaviour once on the product edit screen.
      */
-    private function render_child_attr_row($index, $tax = '', $name = '', $value = '', $selected_terms = [])
+    public function print_child_product_modal()
     {
-        $choices        = $this->get_attribute_taxonomy_choices();
-        $is_global      = $tax !== '' && isset($choices[$tax]);
-        $selected_terms = array_map('intval', (array) $selected_terms);
-        $base           = 'attrs[' . $index . ']';
+        $screen = get_current_screen();
+        if (! $screen || $screen->post_type !== 'product' || $screen->base !== 'post') return;
         ?>
-        <div class="dd-attr-row">
-            <div class="dd-attr-head">
-                <select name="<?php echo esc_attr($base); ?>[tax]" class="dd-attr-tax">
-                    <option value=""><?php esc_html_e('— Custom —', 'silvertell-wc-customisation'); ?></option>
-                    <?php foreach ($choices as $slug => $label) : ?>
-                        <option value="<?php echo esc_attr($slug); ?>" <?php selected($tax, $slug); ?>><?php echo esc_html($label); ?></option>
-                    <?php endforeach; ?>
-                </select>
-                <input type="text" name="<?php echo esc_attr($base); ?>[name]" class="dd-attr-name" placeholder="<?php esc_attr_e('Name', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($name); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
-                <button type="button" class="button dd-attr-del" title="<?php esc_attr_e('Remove', 'silvertell-wc-customisation'); ?>">
-                    <span class="dashicons dashicons-trash" style="margin-top: 3px;"></span>
-                </button>
-            </div>
-            <div class="dd-attr-body">
-                <input type="text" name="<?php echo esc_attr($base); ?>[value]" class="dd-attr-value" placeholder="<?php esc_attr_e('Value (use | for multiple)', 'silvertell-wc-customisation'); ?>" value="<?php echo esc_attr($value); ?>"<?php echo $is_global ? ' style="display:none;"' : ''; ?>>
-                <div class="dd-attr-value-global"<?php echo $is_global ? '' : ' style="display:none;"'; ?>>
-                    <label class="dd-attr-value-label"><?php esc_html_e('Value(s):', 'silvertell-wc-customisation'); ?></label>
-                    <select name="<?php echo esc_attr($base); ?>[terms][]" class="dd-attr-terms" multiple data-placeholder="<?php esc_attr_e('Select values', 'silvertell-wc-customisation'); ?>">
-                        <?php
-                        if ($is_global) {
-                            $terms = get_terms(['taxonomy' => $tax, 'hide_empty' => false]);
-                            if (! is_wp_error($terms)) {
-                                foreach ($terms as $term) {
-                                    echo '<option value="' . esc_attr($term->term_id) . '" ' . selected(in_array((int) $term->term_id, $selected_terms, true), true, false) . '>' . esc_html($term->name) . '</option>';
-                                }
-                            }
-                        }
-                        ?>
-                    </select>
-                    <div class="dd-attr-term-actions">
-                        <button type="button" class="button dd-attr-select-all"><?php esc_html_e('Select all', 'silvertell-wc-customisation'); ?></button>
-                        <button type="button" class="button dd-attr-select-none"><?php esc_html_e('Select none', 'silvertell-wc-customisation'); ?></button>
-                        <button type="button" class="button button-primary dd-attr-create"><?php esc_html_e('Create value', 'silvertell-wc-customisation'); ?></button>
-                    </div>
+        <div id="dd-child-modal" class="dd-child-modal" style="display:none;">
+            <div class="dd-child-modal-overlay"></div>
+            <div class="dd-child-modal-box">
+                <div class="dd-child-modal-head">
+                    <h2 class="dd-child-modal-title"><?php esc_html_e('Edit Child Product', 'silvertell-wc-customisation'); ?></h2>
+                    <button type="button" class="dd-child-modal-close" aria-label="Close">&times;</button>
+                </div>
+                <form class="dd-child-modal-form"><div class="dd-child-modal-body"></div></form>
+                <div class="dd-child-modal-foot">
+                    <span class="dd-child-modal-msg"></span>
+                    <button type="button" class="button button-primary dd-child-modal-save"><?php esc_html_e('Save', 'silvertell-wc-customisation'); ?></button>
+                    <button type="button" class="button dd-child-modal-cancel"><?php esc_html_e('Cancel', 'silvertell-wc-customisation'); ?></button>
                 </div>
             </div>
         </div>
+
+        <style>
+            .dd-child-list-wrap { margin-bottom: 8px; }
+            .dd-child-row { display:flex; align-items:center; gap:12px; padding:8px 6px; border-bottom:1px solid #f0f0f1; }
+            .dd-child-row:hover { background:#f6f7f7; }
+            .dd-child-name { flex:1; font-weight:600; }
+            .dd-child-twig { color:#a0a5aa; font-weight:400; }
+            .dd-child-sku { width:140px; color:#646970; }
+            .dd-child-actions { white-space:nowrap; }
+            .dd-child-empty { color:#646970; font-style:italic; }
+            
+            /* Modal Core */
+            .dd-child-modal { position:fixed; inset:0; z-index:100000; }
+            .dd-child-modal-overlay { position:absolute; inset:0; background:rgba(0,0,0,.6); }
+            .dd-child-modal-box { position:relative; max-width:700px; margin:5vh auto; background:#fff; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,.3); display:flex; flex-direction:column; max-height:90vh; }
+            .dd-child-modal-head { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid #dcdcde; background: #fcfcfc; border-radius: 6px 6px 0 0; }
+            .dd-child-modal-head h2 { margin:0; font-size:16px; font-weight: 600; }
+            .dd-child-modal-close { background:none; border:none; font-size:24px; line-height:1; cursor:pointer; color:#646970; transition: color 0.2s; }
+            .dd-child-modal-close:hover { color: #d63638; }
+            .dd-child-modal-form { overflow:auto; }
+            .dd-child-modal-body { padding:24px; }
+            .dd-child-modal-foot { display:flex; align-items:center; gap:10px; padding:16px 24px; border-top:1px solid #dcdcde; background: #fcfcfc; border-radius: 0 0 6px 6px; }
+            .dd-child-modal-foot .dd-child-modal-msg { flex:1; color:#d63638; font-weight: 500; }
+            .dd-child-modal.is-saving .dd-child-modal-box { opacity:.6; pointer-events:none; }
+            
+            /* General Fields */
+            .dd-modal-field { margin-bottom:20px; }
+            .dd-modal-field > label { display:block; font-weight:600; margin-bottom:6px; color: #1d2327; }
+            .dd-full-width { width:100%; }
+            .dd-cat-checklist { max-height:180px; overflow:auto; border:1px solid #dcdcde; padding:12px; margin:0; border-radius:4px; background: #fff; }
+            .dd-cat-checklist ul.children { margin-left:18px; }
+            .dd-modal-subfield { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+            .dd-modal-sublabel { width:100px; color:#50575e; font-weight: 500; }
+            
+            /* Styled Attribute Repeater Row */
+            .dd-attr-row { border:1px solid #dcdcde; border-radius:4px; margin-bottom:15px; background:#fff; box-shadow: 0 1px 2px rgba(0,0,0,0.03); overflow: hidden; }
+            .dd-attr-head { display:flex; gap:12px; align-items:center; padding:10px 16px; background:#f6f7f7; border-bottom:1px solid #dcdcde; }
+            .dd-attr-head .dd-attr-tax { flex:0 0 220px; max-width: 50%; }
+            .dd-attr-head .dd-attr-name { flex:1; }
+            .dd-attr-head .dd-attr-del { margin-left:auto; color:#d63638; border-color:transparent; background:transparent; padding: 0 6px; }
+            .dd-attr-head .dd-attr-del:hover { background:#d63638; color:#fff; border-color:#d63638; }
+            .dd-attr-body { padding:16px; }
+            .dd-attr-body .dd-attr-value { width:100%; }
+            .dd-attr-value-label { display:block; font-weight:600; margin-bottom:8px; color:#1d2327; }
+            
+            /* Attribute Terms & Buttons */
+            .dd-attr-terms { width:100%; }
+            .dd-attr-term-actions { margin-top:12px; display:flex; gap:8px; align-items:center; }
+            .dd-attr-term-actions .button { font-size:12px; padding:0 10px; min-height:26px; line-height:24px; }
+            .dd-attr-term-actions .dd-attr-create { margin-left:auto; }
+            
+            /* Select2 Overrides */
+            .select2-container { z-index: 100005 !important; }
+            .select2-container--default .select2-selection--multiple { border-color: #dcdcde; border-radius: 4px; min-height: 34px; }
+        </style>
+
+        <script>
+            (function($) {
+                var nonce = $('#silvertell_child_nonce').val();
+                var $modal = $('#dd-child-modal');
+                var $manager = $('.dd-children-manager');
+                var rootParent = $manager.data('parent');
+                var ddAttrTerms = <?php echo wp_json_encode($this->get_attribute_terms_map()); ?>;
+                var wcAddAttrNonce = '<?php echo esc_js(wp_create_nonce('add-attribute')); ?>';
+                var attrIdx = 0;
+                
+                /**
+                 * Dynamically evaluate the select2 instance function.
+                 */
+                function getS2Fn() {
+                    return $.fn.selectWoo ? 'selectWoo' : ($.fn.select2 ? 'select2' : null);
+                }
+
+                /**
+                 * Initialize the select2/selectWoo interface.
+                 * @param {jQuery} $sel The select element.
+                 */
+                function s2Init($sel) {
+                    var s2fn = getS2Fn();
+                    if (!s2fn) return;
+                    $sel[s2fn]({ 
+                        width: '100%', 
+                        placeholder: $sel.data('placeholder') || ''
+                    });
+                }
+
+                /**
+                 * Destroy the select2/selectWoo instance.
+                 * @param {jQuery} $sel The select element.
+                 */
+                function s2Destroy($sel) {
+                    var s2fn = getS2Fn();
+                    if (s2fn && $sel.hasClass('select2-hidden-accessible')) { 
+                        try { $sel[s2fn]('destroy'); } catch (e) {} 
+                    }
+                }
+
+                function initAttrRows() {
+                    $modal.find('.dd-attr-row').each(function() {
+                        var $row = $(this);
+                        if ($row.find('.dd-attr-tax').val()) s2Init($row.find('.dd-attr-terms'));
+                    });
+                }
+
+                function syncAttrRow($row) {
+                    var tax = $row.find('.dd-attr-tax').val();
+                    var $name = $row.find('.dd-attr-name');
+                    var $value = $row.find('.dd-attr-value');
+                    var $global = $row.find('.dd-attr-value-global');
+                    var $terms = $row.find('.dd-attr-terms');
+                    
+                    s2Destroy($terms);
+                    $terms.empty();
+                    
+                    if (tax) {
+                        (ddAttrTerms[tax] || []).forEach(function(o) {
+                            $terms.append(new Option(o.name, o.id, false, false));
+                        });
+                        $name.hide(); $value.hide(); $global.show();
+                        s2Init($terms);
+                    } else {
+                        $global.hide();
+                        $name.show(); $value.show();
+                    }
+                }
+
+                function openModal(id, parent, title) {
+                    $modal.find('.dd-child-modal-title').text(title);
+                    $modal.find('.dd-child-modal-msg').text('');
+                    $modal.find('.dd-child-modal-body').html('<p>Loading…</p>');
+                    $modal.show();
+                    
+                    $.post(ajaxurl, { action: 'silvertell_child_form', nonce: nonce, id: id, parent: parent }, function(res) {
+                        if (res && res.success) {
+                            $modal.find('.dd-child-modal-body').html(res.data.html);
+                            initAttrRows();
+                        } else {
+                            $modal.find('.dd-child-modal-body').html('<p>Could not load the form.</p>');
+                        }
+                    });
+                }
+
+                function closeModal() { $modal.hide(); }
+
+                $manager.on('click', '.dd-child-edit', function() {
+                    openModal($(this).data('id'), 0, '<?php echo esc_js(__('Edit Child Product', 'silvertell-wc-customisation')); ?>');
+                });
+                
+                $manager.on('click', '.dd-child-add', function() {
+                    openModal(0, $(this).data('parent'), '<?php echo esc_js(__('Add Child Product', 'silvertell-wc-customisation')); ?>');
+                });
+                
+                $manager.on('click', '.dd-child-delete', function() {
+                    if (!confirm('<?php echo esc_js(__('Permanently delete this child product and its sub-items? This cannot be undone.', 'silvertell-wc-customisation')); ?>')) return;
+                    $.post(ajaxurl, { action: 'silvertell_child_delete', nonce: nonce, id: $(this).data('id'), root: rootParent }, function(res) {
+                        if (res && res.success) $('.dd-child-list-wrap').html(res.data.list);
+                    });
+                });
+
+                $modal.on('click', '.dd-child-modal-close, .dd-child-modal-cancel, .dd-child-modal-overlay', closeModal);
+                
+                $modal.on('click', '.dd-attr-add', function() {
+                    var tpl = $('.dd-attr-template').html().replace(/__INDEX__/g, 'new' + (attrIdx++));
+                    $(this).closest('.dd-modal-field').find('.dd-attr-rows').append(tpl);
+                });
+                
+                $modal.on('click', '.dd-attr-del', function() {
+                    var $row = $(this).closest('.dd-attr-row');
+                    s2Destroy($row.find('.dd-attr-terms'));
+                    $row.remove();
+                });
+                
+                $modal.on('change', '.dd-attr-tax', function() { 
+                    syncAttrRow($(this).closest('.dd-attr-row')); 
+                });
+
+                $modal.on('click', '.dd-attr-select-all', function() {
+                    var $t = $(this).closest('.dd-attr-row').find('.dd-attr-terms');
+                    $t.find('option').prop('selected', true);
+                    $t.trigger('change');
+                });
+                
+                $modal.on('click', '.dd-attr-select-none', function() {
+                    var $t = $(this).closest('.dd-attr-row').find('.dd-attr-terms');
+                    $t.find('option').prop('selected', false);
+                    $t.trigger('change');
+                });
+                
+                $modal.on('click', '.dd-attr-create', function() {
+                    var $row = $(this).closest('.dd-attr-row');
+                    var tax = $row.find('.dd-attr-tax').val();
+                    if (!tax) return;
+                    
+                    var name = window.prompt('<?php echo esc_js(__('Enter a new value name:', 'silvertell-wc-customisation')); ?>');
+                    if (!name) return;
+                    
+                    var $t = $row.find('.dd-attr-terms');
+                    
+                    $.post(ajaxurl, { 
+                        action: 'woocommerce_add_new_attribute', 
+                        taxonomy: tax, 
+                        term: name, 
+                        security: wcAddAttrNonce 
+                    }, function(res) {
+                        if (res && res.term_id) {
+                            $t.append(new Option(res.name, res.term_id, true, true)).trigger('change');
+                            (ddAttrTerms[tax] = ddAttrTerms[tax] || []).push({ id: res.term_id, name: res.name });
+                        } else {
+                            var errorMsg = (res && res.data && res.data.error) ? res.data.error : '<?php echo esc_js(__('Could not create the value.', 'silvertell-wc-customisation')); ?>';
+                            alert(errorMsg);
+                        }
+                    });
+                });
+
+                $modal.on('click', '.dd-child-modal-save', function() {
+                    var $btn = $(this);
+                    var data = $modal.find('.dd-child-modal-form').serialize();
+                    
+                    data += '&action=silvertell_child_save&nonce=' + encodeURIComponent(nonce) + '&root=' + encodeURIComponent(rootParent);
+                    $modal.addClass('is-saving');
+                    $modal.find('.dd-child-modal-msg').text('');
+                    
+                    $.post(ajaxurl, data, function(res) {
+                        $modal.removeClass('is-saving');
+                        if (res && res.success) {
+                            $('.dd-child-list-wrap').html(res.data.list);
+                            closeModal();
+                        } else {
+                            $modal.find('.dd-child-modal-msg').text((res && res.data && res.data.message) ? res.data.message : 'Save failed.');
+                        }
+                    });
+                });
+            })(jQuery);
+        </script>
         <?php
     }
 

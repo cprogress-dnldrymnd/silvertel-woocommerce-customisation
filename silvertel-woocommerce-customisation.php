@@ -1603,6 +1603,14 @@ class Silvertell_Woocommerce_Customisation
             .woocommerce-Tabs-panel > h2 {
                 display: none;
             }
+            .woocommerce div.product.elementor ul.tabs li a {
+                padding-left: 0;
+                padding-right: 0;
+            }
+            .woocommerce div.product.elementor .woocommerce-tabs .panel {
+                padding-left: 0;
+                padding-right: 0;
+            }
         </style>
         <script>
             /* Lightweight tab switcher: ensures only the active panel is shown.

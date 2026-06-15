@@ -3009,7 +3009,7 @@ class Silvertell_Woocommerce_Customisation
             .dd-buy-modal-list .dd-buy-acc-body li {
                 margin: 0;
             }
-            .dd-buy-modal-list .dd-buy-acc-body li"not(:last-child) {
+            .dd-buy-modal-list .dd-buy-acc-body li:not(:last-child) {
                 border-bottom: 1px solid #eee;
             }
             .dd-buy-modal-list .dd-buy-acc-body li a {

@@ -2671,7 +2671,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-feature-list li::before {
                 content: "\2713";
-                background-color: #0089FF;
+                background-color: var(--e-global-color-c172edd);
                 font-weight: 700;
                 width: 20px;
                 height: 20px;
@@ -2776,7 +2776,7 @@ class Silvertell_Woocommerce_Customisation
                 gap: 5px;
                 margin: 2px 6px 2px 0;
                 padding: 10px 25px;
-                background: #0089FF;
+                background: var(--e-global-color-c172edd);
                 color: #fff;
                 border-radius: 50px;
                 font-size: 13px;
@@ -2799,7 +2799,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-buy-btn--logo:hover {
                 background: #fff;
-                border-color: #0089FF;
+                border-color: var(--e-global-color-c172edd);
                 box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
             }
 
@@ -2837,7 +2837,7 @@ class Silvertell_Woocommerce_Customisation
                 margin-left: 8px;
                 padding: 0 5px;
                 border-radius: 9px;
-                background: #0089FF;
+                background: var(--e-global-color-c172edd);
                 color: #fff;
                 font-size: 11px;
                 font-weight: 600;
@@ -2931,7 +2931,7 @@ class Silvertell_Woocommerce_Customisation
                 font-weight: 700;
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
-                color: #0089FF;
+                color: var(--e-global-color-c172edd);
             }
 
             .dd-buy-acc-tab:first-child {
@@ -2959,6 +2959,12 @@ class Silvertell_Woocommerce_Customisation
                 text-align: left;
                 letter-spacing: 1px;
                 text-transform: uppercase;
+            }
+
+            .dd-buy-acc-head.dd-buy-acc-head.dd-buy-acc-head.dd-buy-acc-head[aria-expanded="true"] {
+                border-radius: 6px 6px 0 0;
+                background-color: var(--e-global-color-c172edd);
+                color: #fff;
             }
 
             .dd-buy-acc-head:hover {
@@ -3034,7 +3040,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-buy-modal-list li a:hover {
-                border-color: #0089FF;
+                border-color: var(--e-global-color-c172edd);
                 background: #f5faff;
             }
 

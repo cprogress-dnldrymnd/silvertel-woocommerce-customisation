@@ -3025,6 +3025,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-buy-modal-list .dd-buy-acc-body li a:hover {
                 background: #f5faff;
+                border-bottom: 1px solid #eee;
             }
 
             .dd-buy-modal-list li a {

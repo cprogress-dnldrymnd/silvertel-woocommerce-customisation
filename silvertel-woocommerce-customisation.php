@@ -2192,16 +2192,23 @@ class Silvertell_Woocommerce_Customisation
             .dd-feature-list li {
                 position: relative;
                 margin-bottom: 8px;
-                padding-left: 1.6em;
+                display: flex;
+                align-items: center;
             }
 
             .dd-feature-list li::before {
                 content: "\2713";
-                position: absolute;
-                left: 0;
-                top: 0;
-                color: #0089FF;
+                background-color: #0089FF;
                 font-weight: 700;
+                width: 20px;
+                height: 20px;
+                fleX: 0 0 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #fff;
+                border-radius: 5px;
+                font-size: 10px;
             }
 
             @media (min-width: 768px) {

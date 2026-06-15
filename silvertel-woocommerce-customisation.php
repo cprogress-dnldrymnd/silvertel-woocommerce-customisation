@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.37.0
+ * Version: 2.38.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2216,7 +2216,7 @@ class Silvertell_Woocommerce_Customisation
      * The sub-range product's child category under "Product Range" (e.g. "New Preferred
      * Range" / "Extended Range"), used as the Product Range sub-tab label. Empty when none.
      */
-    private function get_product_range_subcategory($product_id)
+    private static function get_product_range_subcategory($product_id)
     {
         $terms = get_the_terms($product_id, 'product_cat');
         if (empty($terms) || is_wp_error($terms)) return '';
@@ -2378,25 +2378,30 @@ class Silvertell_Woocommerce_Customisation
     /**
      * Like render_provider_buttons(), but for a whole product "range": it aggregates the
      * links from the product itself and every descendant variant, grouped per provider.
-     * Each link is labelled by its own label if set, otherwise by the source product's
-     * title (e.g. the variant part number). So a range parent (which has no links of its
-     * own) still shows each distributor's logo once, and clicking it lists every variant's
-     * link for that distributor. Duplicate URLs are collapsed.
+     * Each link keeps its range context (sub-tab label + sub-range group title) so the
+     * popup can show headings (New Preferred Range > Ag9900-MTB > …) instead of a flat
+     * list. Each link is labelled by its own label if set, otherwise by the source
+     * product's title (e.g. the variant part number). Duplicate URLs are collapsed.
      */
     public static function render_aggregated_provider_buttons($product_id)
     {
-        $sources = self::collect_range_product_ids($product_id);
+        $sources = self::collect_range_link_sources($product_id);
 
         $entries = [];
         foreach (self::get_sample_providers() as $provider) {
             $links = [];
             $seen  = [];
             foreach ($sources as $src) {
-                foreach (self::get_provider_links($src, $provider) as $link) {
+                foreach (self::get_provider_links($src['id'], $provider) as $link) {
                     if (isset($seen[$link['url']])) continue;
                     $seen[$link['url']] = true;
-                    $label   = $link['label'] !== '' ? $link['label'] : get_the_title($src);
-                    $links[] = ['label' => $label, 'url' => $link['url']];
+                    $label   = $link['label'] !== '' ? $link['label'] : get_the_title($src['id']);
+                    $links[] = [
+                        'label'   => $label,
+                        'url'     => $link['url'],
+                        'tab'     => $src['tab'],
+                        'section' => $src['section'],
+                    ];
                 }
             }
             if (! empty($links)) {
@@ -2407,30 +2412,57 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Product IDs that make up a range: the product itself plus every descendant product
-     * (breadth-first, so the parent's own links come first), used to aggregate buy links.
+     * Ordered list of the link sources that make up a range, each carrying its display
+     * context: ['id', 'tab' (sub-tab / "Product Range" subcategory), 'section' (sub-range
+     * group title)]. Mirrors build_product_range()'s structure (L1 product, L2 sub-range
+     * groups, L3 variants) and groups by sub-tab so same-tab entries stay contiguous,
+     * which lets the popup print each heading once.
      */
-    private static function collect_range_product_ids($product_id)
+    private static function collect_range_link_sources($product_id)
     {
-        $ids   = [(int) $product_id];
-        $queue = [(int) $product_id];
+        // The product's own links first, ungrouped (covers simple, childless products).
+        $ordered = [['id' => (int) $product_id, 'tab' => '', 'section' => '']];
 
-        while (! empty($queue)) {
-            $current  = array_shift($queue);
-            $children = get_posts([
-                'post_type'   => 'product',
-                'post_status' => 'publish',
-                'post_parent' => $current,
-                'numberposts' => -1,
-                'fields'      => 'ids',
-                'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
-            ]);
-            foreach ($children as $cid) {
-                $ids[]   = (int) $cid;
-                $queue[] = (int) $cid;
+        $l2 = self::get_child_product_ids($product_id);
+        if (empty($l2)) return $ordered;
+
+        // Bucket L2 groups by their sub-tab label, preserving first-seen order.
+        $by_tab    = [];
+        $tab_order = [];
+        foreach ($l2 as $gid) {
+            $tab = self::get_product_range_subcategory($gid);
+            $l3  = self::get_child_product_ids($gid);
+            if (! in_array($tab, $tab_order, true)) $tab_order[] = $tab;
+            if (! empty($l3)) {
+                // A sub-range group (e.g. Ag9900-MTB): its variants become the rows.
+                $by_tab[$tab][] = ['title' => get_the_title($gid), 'ids' => $l3];
+            } else {
+                // A flat variant directly under the product: no section heading.
+                $by_tab[$tab][] = ['title' => '', 'ids' => [(int) $gid]];
             }
         }
-        return $ids;
+
+        foreach ($tab_order as $tab) {
+            foreach ($by_tab[$tab] as $section) {
+                foreach ($section['ids'] as $vid) {
+                    $ordered[] = ['id' => (int) $vid, 'tab' => $tab, 'section' => $section['title']];
+                }
+            }
+        }
+        return $ordered;
+    }
+
+    /** Published immediate child product IDs, in menu/import order. */
+    private static function get_child_product_ids($parent_id)
+    {
+        return get_posts([
+            'post_type'   => 'product',
+            'post_status' => 'publish',
+            'post_parent' => $parent_id,
+            'numberposts' => -1,
+            'fields'      => 'ids',
+            'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
+        ]);
     }
 
     /**
@@ -2468,9 +2500,30 @@ class Silvertell_Woocommerce_Customisation
                 $out .= '<a class="' . $cls . '" href="' . esc_url($links[0]['url']) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($name) . '">' . $inner . '</a>';
             } else {
                 // Multiple links: a button that opens a popup list. The link list lives in
-                // an adjacent hidden span the modal JS copies from.
-                $items = '';
+                // an adjacent hidden span the modal JS copies from. Links carry optional
+                // range context ('tab' / 'section'); print each heading once as it changes,
+                // so the popup reflects the sub-tab / sub-range grouping.
+                $items    = '';
+                $cur_tab  = null;
+                $cur_sect = null;
                 foreach ($links as $link) {
+                    $tab     = isset($link['tab']) ? $link['tab'] : '';
+                    $section = isset($link['section']) ? $link['section'] : '';
+
+                    if ($tab !== $cur_tab) {
+                        if ($tab !== '') {
+                            $items .= '<li class="dd-buy-grp dd-buy-grp--tab">' . esc_html($tab) . '</li>';
+                        }
+                        $cur_tab  = $tab;
+                        $cur_sect = null; // section headings restart under each tab
+                    }
+                    if ($section !== $cur_sect) {
+                        if ($section !== '') {
+                            $items .= '<li class="dd-buy-grp dd-buy-grp--section">' . esc_html($section) . '</li>';
+                        }
+                        $cur_sect = $section;
+                    }
+
                     $label  = $link['label'] !== '' ? $link['label'] : $link['url'];
                     $items .= '<li><a href="' . esc_url($link['url']) . '" target="_blank" rel="noopener nofollow">' . esc_html($label) . '</a></li>';
                 }
@@ -2808,6 +2861,37 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-buy-modal-list li {
                 margin: 0 0 8px;
+            }
+
+            /* Range grouping headings inside the popup. */
+            .dd-buy-modal-list li.dd-buy-grp {
+                margin: 0;
+                padding: 0;
+            }
+
+            .dd-buy-modal-list li.dd-buy-grp--tab {
+                margin: 18px 0 8px;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #0089FF;
+            }
+
+            .dd-buy-modal-list li.dd-buy-grp--tab:first-child {
+                margin-top: 0;
+            }
+
+            .dd-buy-modal-list li.dd-buy-grp--section {
+                margin: 12px 0 6px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #333;
+            }
+
+            /* A section sitting right under its tab heading shouldn't double the gap. */
+            .dd-buy-modal-list li.dd-buy-grp--tab + li.dd-buy-grp--section {
+                margin-top: 0;
             }
 
             .dd-buy-modal-list li a {

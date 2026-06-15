@@ -107,10 +107,13 @@ The major subsystems:
   pill becomes a `<button class="dd-buy-btn--multi">` that opens the `.dd-buy-modal` popup
   (markup/CSS/JS injected by `inject_frontend_assets`). The **Buy Samples Elementor widget**
   uses `render_aggregated_provider_buttons` instead: it walks the product **and all its
-  variant descendants** (`collect_range_product_ids`) and merges each distributor's links
-  into one logo whose popup lists every variant's link (labelled by variant title) — so a
-  range parent like Ag9900, which has no links of its own, still shows the distributors.
-  `render_provider_link_buttons` is the shared pill/popup HTML builder.
+  variant descendants** (`collect_range_link_sources`, which mirrors `build_product_range`'s
+  L1/L2/L3 structure) and merges each distributor's links into one logo whose popup lists
+  every variant's link (labelled by variant title) — so a range parent like Ag9900, which
+  has no links of its own, still shows the distributors. Each link keeps its `tab`
+  (sub-tab / "Product Range" subcategory) and `section` (sub-range group title), so the
+  popup prints grouping headings (e.g. *New Preferred Range > Ag9900-MTB*) instead of a
+  flat list. `render_provider_link_buttons` is the shared pill/popup HTML builder.
 
 - **Other frontend single-product tabs** (`register_frontend_product_tabs`, on
   `woocommerce_product_tabs`, priority 98): hides the Reviews tab, pushes "Additional

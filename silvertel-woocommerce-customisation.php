@@ -3009,12 +3009,13 @@ class Silvertell_Woocommerce_Customisation
             .dd-buy-modal-list .dd-buy-acc-body li {
                 margin: 0;
             }
-
+            .dd-buy-modal-list .dd-buy-acc-body li"not(:last-child) {
+                border-bottom: 1px solid #eee;
+            }
             .dd-buy-modal-list .dd-buy-acc-body li a {
                 padding: 11px;
                 border: 0;
                 border-radius: 0;
-                border-bottom: 1px solid #eee;
                 box-shadow: none;
                 font-size: 14px;
             }
@@ -3025,7 +3026,6 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-buy-modal-list .dd-buy-acc-body li a:hover {
                 background: #f5faff;
-                border-bottom: 1px solid #eee;
             }
 
             .dd-buy-modal-list li a {

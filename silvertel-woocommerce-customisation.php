@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.42.0
+ * Version: 2.43.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2098,12 +2098,14 @@ class Silvertell_Woocommerce_Customisation
     /** Render one evaluation-board variant table (name + buy buttons). */
     private function render_eb_board_table($boards)
     {
+        $buy_samples_label = __('Buy Samples', 'silvertell-wc-customisation');
+
         echo '<table class="dd-eb-table"><tbody>';
         foreach ($boards as $board) {
             $buttons = $this->render_provider_buttons($board->ID);
             echo '<tr>';
             echo '<td class="dd-eb-name">' . esc_html($board->post_title) . '</td>';
-            echo '<td class="dd-eb-buy">' . ($buttons ?: '&mdash;') . '</td>';
+            echo '<td class="dd-eb-buy" data-label="' . esc_attr($buy_samples_label) . '">' . ($buttons ?: '&mdash;') . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
@@ -2307,24 +2309,27 @@ class Silvertell_Woocommerce_Customisation
             }
         }
 
+        $part_number_label = __('Part Number', 'silvertell-wc-customisation');
+        $buy_samples_label = __('Buy Samples', 'silvertell-wc-customisation');
+
         echo '<table class="dd-range-table"><thead><tr>';
-        echo '<th>' . esc_html__('Part Number', 'silvertell-wc-customisation') . '</th>';
+        echo '<th>' . esc_html($part_number_label) . '</th>';
         foreach ($attr_labels as $label) {
             echo '<th>' . esc_html($label) . '</th>';
         }
-        echo '<th>' . esc_html__('Buy Samples', 'silvertell-wc-customisation') . '</th>';
+        echo '<th>' . esc_html($buy_samples_label) . '</th>';
         echo '</tr></thead><tbody>';
 
         foreach ($products as $p) {
             $pid = $p->get_id();
             echo '<tr>';
             echo '<td class="dd-range-name">' . esc_html($p->get_name()) . '</td>';
-            foreach (array_keys($attr_labels) as $attr_key) {
+            foreach ($attr_labels as $attr_key => $label) {
                 $val = $p->get_attribute($attr_key);
-                echo '<td>' . ($val !== '' ? esc_html($val) : '&mdash;') . '</td>';
+                echo '<td data-label="' . esc_attr($label) . '">' . ($val !== '' ? esc_html($val) : '&mdash;') . '</td>';
             }
             $buttons = $this->render_provider_buttons($pid);
-            echo '<td class="dd-range-buy">' . ($buttons ?: '&mdash;') . '</td>';
+            echo '<td class="dd-range-buy" data-label="' . esc_attr($buy_samples_label) . '">' . ($buttons ?: '&mdash;') . '</td>';
             echo '</tr>';
         }
 
@@ -2648,6 +2653,56 @@ class Silvertell_Woocommerce_Customisation
                 padding-top: 5px;
             }
 
+            /* ---- Single-product tabs become an accordion below 768px ---- */
+            @media (max-width: 768px) {
+
+                .woocommerce-tabs ul.tabs.wc-tabs {
+                    display: block;
+                    gap: 0;
+                    margin: 0 0 10px;
+                    border-bottom: 0;
+                }
+
+                .woocommerce-tabs ul.tabs.wc-tabs li {
+                    border-bottom: 1px solid #e0e0e0;
+                }
+
+                .woocommerce-tabs ul.tabs.wc-tabs li a {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 10px;
+                    padding: 14px 0;
+                    margin-bottom: 0;
+                    border-bottom: 0;
+                    font-weight: 600;
+                }
+
+                .woocommerce-tabs ul.tabs.wc-tabs li a::after {
+                    content: '+';
+                    flex: 0 0 auto;
+                    font-size: 20px;
+                    font-weight: 400;
+                    line-height: 1;
+                    color: #777;
+                }
+
+                .woocommerce-tabs ul.tabs.wc-tabs li.active a,
+                .woocommerce-tabs ul.tabs.wc-tabs li[aria-selected="true"] a {
+                    border-bottom-color: transparent;
+                    color: #111;
+                }
+
+                .woocommerce-tabs ul.tabs.wc-tabs li.active a::after,
+                .woocommerce-tabs ul.tabs.wc-tabs li[aria-selected="true"] a::after {
+                    content: '\2212';
+                }
+
+                .woocommerce-tabs .dd-accordion-panel {
+                    padding: 4px 0 20px;
+                }
+            }
+
             .dd-tab-content {
                 margin: 0 0 10px;
             }
@@ -2769,6 +2824,70 @@ class Silvertell_Woocommerce_Customisation
             .dd-range-table thead th {
                 background: #f6f7f7;
                 font-weight: 600;
+            }
+
+            /* ---- Responsive tables: stack into cards below 768px ---- */
+            @media (max-width: 768px) {
+
+                .dd-range-table,
+                .dd-eb-table {
+                    border: 0;
+                }
+
+                .dd-range-table thead {
+                    display: none;
+                }
+
+                .dd-range-table tr,
+                .dd-eb-table tr {
+                    display: block;
+                    margin-bottom: 12px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
+                    overflow: hidden;
+                }
+
+                .dd-range-table td,
+                .dd-eb-table td {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                    padding: 10px 12px;
+                    border: 0;
+                    border-bottom: 1px solid #f0f0f0;
+                }
+
+                .dd-range-table tr > td:last-child,
+                .dd-eb-table tr > td:last-child {
+                    border-bottom: 0;
+                }
+
+                .dd-range-table td[data-label]::before,
+                .dd-eb-table td[data-label]::before {
+                    content: attr(data-label);
+                    font-weight: 600;
+                    color: #50575e;
+                    flex: 0 0 auto;
+                }
+
+                .dd-range-table td.dd-range-name,
+                .dd-eb-table td.dd-eb-name {
+                    background: #f6f7f7;
+                    font-weight: 600;
+                    font-size: 15px;
+                }
+
+                .dd-range-table td.dd-range-buy,
+                .dd-eb-table td.dd-eb-buy {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+
+                .dd-range-table td.dd-range-buy::before,
+                .dd-eb-table td.dd-eb-buy::before {
+                    margin-bottom: 6px;
+                }
             }
 
             .dd-buy-btn {
@@ -3198,31 +3317,89 @@ class Silvertell_Woocommerce_Customisation
             }
         </style>
         <script>
-            /* Lightweight tab switcher: ensures only the active panel is shown.
-               Idempotent with WooCommerce's native tabs.js when that is present;
-               provides the behaviour when the theme/Elementor context does not. */
+            /* Tab switcher: ensures only the active panel is shown on desktop, and
+               rearranges into a single-open accordion (panel directly under its
+               header) below 768px. Idempotent with WooCommerce's native tabs.js
+               when that is present; provides the behaviour when the theme/Elementor
+               context does not. */
             (function($) {
                 $(function() {
+                    var mobileMQ = window.matchMedia('(max-width: 768px)');
+
                     $('.woocommerce-tabs').each(function() {
                         var $wrap = $(this);
-                        var $tabs = $wrap.find('ul.tabs.wc-tabs > li');
+                        var $tabsList = $wrap.find('ul.tabs.wc-tabs').first();
+                        var $tabs = $tabsList.find('> li');
                         var $panels = $wrap.find('.woocommerce-Tabs-panel, .wc-tab');
                         if (!$tabs.length || !$panels.length) return;
 
-                        function activate($li) {
+                        $panels.addClass('dd-accordion-panel');
+
+                        var isAccordion = false;
+
+                        function getPanel($li) {
                             var target = $li.find('a').attr('href');
+                            return target ? $wrap.find(target) : $();
+                        }
+
+                        function showTab($li) {
                             $tabs.removeClass('active').attr('aria-selected', 'false');
                             $panels.hide();
                             $li.addClass('active').attr('aria-selected', 'true');
-                            if (target) $(target).show();
+                            getPanel($li).show();
+                        }
+
+                        function toggleAccordion($li) {
+                            var wasActive = $li.hasClass('active');
+                            $tabs.removeClass('active').attr('aria-selected', 'false');
+                            $panels.hide();
+                            if (!wasActive) {
+                                $li.addClass('active').attr('aria-selected', 'true');
+                                getPanel($li).show();
+                            }
+                        }
+
+                        function enterAccordion() {
+                            if (isAccordion) return;
+                            isAccordion = true;
+                            $tabs.each(function() {
+                                var $li = $(this);
+                                var $panel = getPanel($li);
+                                if ($panel.length) $li.after($panel);
+                            });
+                        }
+
+                        function enterTabs() {
+                            if (!isAccordion) return;
+                            isAccordion = false;
+                            var $after = $tabsList;
+                            $tabs.each(function() {
+                                var $panel = getPanel($(this));
+                                if ($panel.length) {
+                                    $after.after($panel);
+                                    $after = $panel;
+                                }
+                            });
+                            var $active = $tabs.filter('.active').first();
+                            showTab($active.length ? $active : $tabs.first());
+                        }
+
+                        function applyMode() {
+                            if (mobileMQ.matches) enterAccordion();
+                            else enterTabs();
                         }
 
                         var $start = $tabs.filter('.active').first();
-                        activate($start.length ? $start : $tabs.first());
+                        showTab($start.length ? $start : $tabs.first());
+                        applyMode();
 
-                        $tabs.on('click', function(e) {
+                        if (mobileMQ.addEventListener) mobileMQ.addEventListener('change', applyMode);
+                        else mobileMQ.addListener(applyMode);
+
+                        $tabsList.on('click', '> li', function(e) {
                             e.preventDefault();
-                            activate($(this));
+                            if (isAccordion) toggleAccordion($(this));
+                            else showTab($(this));
                         });
                     });
 

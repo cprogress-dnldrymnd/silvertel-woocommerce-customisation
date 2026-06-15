@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.33.3
+ * Version: 2.34.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1770,7 +1770,7 @@ class Silvertell_Woocommerce_Customisation
 
         echo '<div class="dd-eb-card">';
 
-        $thumb = get_the_post_thumbnail($eb_id, 'medium', ['class' => 'dd-eb-image']);
+        $thumb = get_the_post_thumbnail($eb_id, 'large', ['class' => 'dd-eb-image']);
         if ($thumb) echo '<div class="dd-eb-image-wrap">' . $thumb . '</div>';
 
         echo '<div class="dd-eb-body">';
@@ -1807,20 +1807,58 @@ class Silvertell_Woocommerce_Customisation
             $groups[$key][] = $child;
         }
 
+        // When the boards fall into more than one named group (e.g. New Preferred /
+        // Extended Range), present them as sub-tabs, mirroring the Product Range tab.
+        // The .dd-range-tabs markup is shared so the same switcher JS/CSS drives both.
+        $named = array_filter(array_keys($groups), function ($k) {
+            return $k !== '';
+        });
+        if (count($named) > 1) {
+            $uid = 'dd-ebrange-' . uniqid();
+            echo '<div class="dd-range-tabs dd-eb-range-tabs" id="' . esc_attr($uid) . '">';
+
+            echo '<ul class="dd-range-nav">';
+            $first = true;
+            foreach ($groups as $group_name => $boards) {
+                $display = $group_name !== '' ? $group_name : __('Range', 'silvertell-wc-customisation');
+                echo '<li class="dd-range-nav-item' . ($first ? ' active' : '') . '" data-target="' . esc_attr(sanitize_title($group_name)) . '">' . esc_html($display) . '</li>';
+                $first = false;
+            }
+            echo '</ul>';
+
+            $first = true;
+            foreach ($groups as $group_name => $boards) {
+                echo '<div class="dd-range-panel' . ($first ? ' active' : '') . '" data-panel="' . esc_attr(sanitize_title($group_name)) . '">';
+                $this->render_eb_board_table($boards);
+                echo '</div>';
+                $first = false;
+            }
+
+            echo '</div>';
+            return;
+        }
+
+        // Single group (or all uncategorised): render heading + table inline.
         foreach ($groups as $group_name => $boards) {
             if ($group_name !== '') {
                 echo '<h4 class="dd-eb-group-title">' . esc_html($group_name) . '</h4>';
             }
-            echo '<table class="dd-eb-table"><tbody>';
-            foreach ($boards as $board) {
-                $buttons = $this->render_provider_buttons($board->ID);
-                echo '<tr>';
-                echo '<td class="dd-eb-name">' . esc_html($board->post_title) . '</td>';
-                echo '<td class="dd-eb-buy">' . ($buttons ?: '&mdash;') . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
+            $this->render_eb_board_table($boards);
         }
+    }
+
+    /** Render one evaluation-board variant table (name + buy buttons). */
+    private function render_eb_board_table($boards)
+    {
+        echo '<table class="dd-eb-table"><tbody>';
+        foreach ($boards as $board) {
+            $buttons = $this->render_provider_buttons($board->ID);
+            echo '<tr>';
+            echo '<td class="dd-eb-name">' . esc_html($board->post_title) . '</td>';
+            echo '<td class="dd-eb-buy">' . ($buttons ?: '&mdash;') . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
     }
 
     public function render_product_range_tab()
@@ -2276,13 +2314,23 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-eb-image-wrap {
-                flex: 0 0 240px;
-                max-width: 240px;
+                flex: 0 0 420px;
+                max-width: 420px;
             }
 
             .dd-eb-image-wrap img {
+                width: 100%;
                 max-width: 100%;
                 height: auto;
+                display: block;
+                border-radius: 6px;
+            }
+
+            @media (max-width: 782px) {
+                .dd-eb-image-wrap {
+                    flex-basis: 100%;
+                    max-width: 100%;
+                }
             }
 
             .dd-eb-body {
@@ -2298,29 +2346,44 @@ class Silvertell_Woocommerce_Customisation
                 margin-top: 12px;
             }
 
+            .dd-range-tabs {
+                margin-bottom: 10px;
+            }
+
             .dd-range-nav {
                 list-style: none;
-                margin: 0 0 25px;
+                margin: 0 0 28px;
                 padding: 0;
                 display: flex;
                 flex-wrap: wrap;
-                gap: 8px;
+                gap: 4px;
                 border-bottom: 1px solid #e0e0e0;
             }
 
             .dd-range-nav-item {
                 cursor: pointer;
-                padding: 10px 18px;
+                padding: 12px 22px;
                 font-weight: 600;
+                letter-spacing: 0.02em;
                 text-transform: uppercase;
                 font-size: 14px;
                 color: #50575e;
+                border: 1px solid transparent;
                 border-bottom: 2px solid transparent;
+                border-radius: 6px 6px 0 0;
                 margin-bottom: -1px;
+                transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+            }
+
+            .dd-range-nav-item:hover {
+                color: #2271b1;
+                background: #f6f7f7;
             }
 
             .dd-range-nav-item.active {
                 color: #2271b1;
+                background: #fff;
+                border-color: #e0e0e0;
                 border-bottom-color: #2271b1;
             }
 
@@ -2330,6 +2393,12 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-range-panel.active {
                 display: block;
+                animation: dd-range-fade 0.2s ease;
+            }
+
+            @keyframes dd-range-fade {
+                from { opacity: 0; }
+                to   { opacity: 1; }
             }
 
             .dd-range-section {

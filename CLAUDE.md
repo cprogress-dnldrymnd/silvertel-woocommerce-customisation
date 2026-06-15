@@ -106,7 +106,13 @@ The major subsystems:
   information" last, and conditionally adds "Documents" (from `_linked_documents`) and
   "Evaluation Boards" (from `_linked_eval_boards`) tabs. Features are **not** a tab —
   they render via the separate "Product Features" Elementor widget
-  (`register_elementor_widgets`).
+  (`register_elementor_widgets`). The Evaluation Boards tab
+  (`render_evaluation_boards_tab`) renders a card per linked board
+  (`render_eval_board_card`), plus a variant table for each board's orderable children
+  grouped by `evaluation-board-category` (`render_eval_board_children_table` →
+  `render_eb_board_table`). If those children span more than one named category, the
+  groups render as `.dd-range-tabs` sub-tabs — the same markup/JS/CSS switcher used by
+  the Product Range tab.
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.39.0
+ * Version: 2.40.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2511,50 +2511,64 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * Build the popup body for a multi-link provider. Links carry range context
-     * ('section' = sub-range group title, 'tab' = sub-tab label); they are grouped by the
-     * deepest available label. With two or more named groups the body is a tab switcher
-     * (the sub-range groups become tabs, e.g. Ag9900M / Ag9900MT / Ag9900LP); otherwise it
-     * falls back to a plain list.
+     * ('section' = sub-range group title, 'tab' = sub-tab label). They are grouped by the
+     * deepest available label; with two or more named groups the body is an accordion (one
+     * collapsible item per sub-range group, e.g. Ag9900M / Ag9900MT / Ag9900LP), preceded
+     * by the sub-tab label (Extended Range / New Preferred Range) as a heading whenever it
+     * changes. With fewer named groups it falls back to a plain list.
      */
     private static function build_buy_popup_content($links)
     {
-        // Bucket links by their group label, preserving first-seen order.
+        // Bucket links by group, preserving first-seen order, remembering each group's tab.
         $groups = [];
         $order  = [];
         foreach ($links as $link) {
             $section = isset($link['section']) ? $link['section'] : '';
             $tab     = isset($link['tab']) ? $link['tab'] : '';
             $label   = $section !== '' ? $section : $tab; // '' when neither
-            if (! isset($groups[$label])) {
-                $groups[$label] = [];
-                $order[]        = $label;
+            $key     = $tab . '||' . $label;             // same section under different tabs stays distinct
+            if (! isset($groups[$key])) {
+                $groups[$key] = ['label' => $label, 'tab' => $tab, 'links' => []];
+                $order[]      = $key;
             }
-            $groups[$label][] = $link;
+            $groups[$key]['links'][] = $link;
         }
 
-        $named = array_values(array_filter($order, function ($k) {
-            return $k !== '';
-        }));
+        $named = array_filter($order, function ($k) use ($groups) {
+            return $groups[$k]['label'] !== '';
+        });
 
-        // Fewer than two named groups → a plain list is clearer than a single tab.
+        // Fewer than two named groups → a plain list is clearer than an accordion.
         if (count($named) < 2) {
             return self::build_buy_links_list($links);
         }
 
-        $uid    = 'dd-buytab-' . substr(md5(implode('|', $order) . microtime()), 0, 8);
-        $nav    = '';
-        $panels = '';
-        $first  = true;
-        $i      = 0;
-        foreach ($order as $label) {
-            $panel_id = $uid . '-' . $i;
-            $display  = $label !== '' ? $label : __('Other', 'silvertell-wc-customisation');
-            $nav     .= '<li class="dd-buy-tabitem' . ($first ? ' active' : '') . '" data-target="' . esc_attr($panel_id) . '">' . esc_html($display) . '</li>';
-            $panels  .= '<div class="dd-buy-tabpanel' . ($first ? ' active' : '') . '" data-panel="' . esc_attr($panel_id) . '">' . self::build_buy_links_list($groups[$label]) . '</div>';
-            $first    = false;
-            $i++;
+        $html    = '<div class="dd-buy-acc">';
+        $cur_tab = null;
+        $first   = true;
+        foreach ($order as $key) {
+            $group = $groups[$key];
+
+            if ($group['tab'] !== $cur_tab) {
+                if ($group['tab'] !== '') {
+                    $html .= '<div class="dd-buy-acc-tab">' . esc_html($group['tab']) . '</div>';
+                }
+                $cur_tab = $group['tab'];
+            }
+
+            $label = $group['label'] !== '' ? $group['label'] : __('Other', 'silvertell-wc-customisation');
+            $open  = $first ? ' is-open' : '';
+            $html .= '<div class="dd-buy-acc-item' . $open . '">'
+                . '<button type="button" class="dd-buy-acc-head" aria-expanded="' . ($first ? 'true' : 'false') . '">'
+                . '<span class="dd-buy-acc-label">' . esc_html($label) . '</span>'
+                . '<span class="dd-buy-acc-icon" aria-hidden="true"></span>'
+                . '</button>'
+                . '<div class="dd-buy-acc-body">' . self::build_buy_links_list($group['links']) . '</div>'
+                . '</div>';
+            $first = false;
         }
-        return '<div class="dd-buy-tabs"><ul class="dd-buy-tabnav">' . $nav . '</ul>' . $panels . '</div>';
+        $html .= '</div>';
+        return $html;
     }
 
     /** A <ul> of buy links (label → URL). */
@@ -2898,43 +2912,98 @@ class Silvertell_Woocommerce_Customisation
                 margin: 0 0 8px;
             }
 
-            /* Sub-range group tabs inside the popup. */
-            .dd-buy-tabnav {
-                list-style: none;
-                margin: 0 0 16px;
-                padding: 0;
+            /* Sub-range group accordion inside the popup. */
+            .dd-buy-acc-tab {
+                margin: 16px 0 8px;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #0089FF;
+            }
+
+            .dd-buy-acc-tab:first-child {
+                margin-top: 0;
+            }
+
+            .dd-buy-acc-item {
+                margin: 0 0 6px;
+            }
+
+            .dd-buy-acc-head {
+                width: 100%;
                 display: flex;
-                flex-wrap: wrap;
-                gap: 16px;
-                border-bottom: 1px solid #e0e0e0;
-            }
-
-            .dd-buy-tabnav li.dd-buy-tabitem {
-                list-style: none;
-                margin: 0 0 -1px;
-                padding: 0 0 8px;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                padding: 11px 14px;
+                background: #f4f6f8;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
                 cursor: pointer;
-                font-size: 13px;
+                font-size: 14px;
                 font-weight: 600;
-                color: #777;
-                border-bottom: 2px solid transparent;
+                color: #222;
+                text-align: left;
             }
 
-            .dd-buy-tabnav li.dd-buy-tabitem:hover {
-                color: #111;
+            .dd-buy-acc-head:hover {
+                background: #eef2f6;
             }
 
-            .dd-buy-tabnav li.dd-buy-tabitem.active {
-                color: #111;
-                border-bottom-color: #0089FF;
+            .dd-buy-acc-item.is-open .dd-buy-acc-head {
+                border-radius: 6px 6px 0 0;
+                border-bottom-color: transparent;
             }
 
-            .dd-buy-tabpanel {
+            .dd-buy-acc-icon {
+                flex: 0 0 auto;
+                width: 8px;
+                height: 8px;
+                margin-top: -3px;
+                border-right: 2px solid #888;
+                border-bottom: 2px solid #888;
+                transform: rotate(45deg);
+                transition: transform 0.2s ease;
+            }
+
+            .dd-buy-acc-item.is-open .dd-buy-acc-icon {
+                margin-top: 3px;
+                transform: rotate(-135deg);
+            }
+
+            .dd-buy-acc-body {
                 display: none;
+                padding: 10px 12px 2px;
+                border: 1px solid #e0e0e0;
+                border-top: 0;
+                border-radius: 0 0 6px 6px;
             }
 
-            .dd-buy-tabpanel.active {
+            .dd-buy-acc-item.is-open .dd-buy-acc-body {
                 display: block;
+            }
+
+            /* Links inside an accordion body: a clean divided list, not nested pills. */
+            .dd-buy-modal-list .dd-buy-acc-body li {
+                margin: 0;
+            }
+
+            .dd-buy-modal-list .dd-buy-acc-body li a {
+                padding: 9px 4px;
+                border: 0;
+                border-radius: 0;
+                border-bottom: 1px solid #eee;
+                box-shadow: none;
+            }
+
+            .dd-buy-modal-list .dd-buy-acc-body li:last-child a {
+                border-bottom: 0;
+            }
+
+            .dd-buy-modal-list .dd-buy-acc-body li a:hover {
+                border-color: transparent;
+                background: #f5faff;
             }
 
             .dd-buy-modal-list li a {
@@ -3182,16 +3251,18 @@ class Silvertell_Woocommerce_Customisation
                         if (e.key === 'Escape' && $modal.hasClass('is-open')) closeModal();
                     });
 
-                    // Sub-range group tabs inside the popup (delegated, as the content is
-                    // injected at open time).
-                    $modal.on('click', '.dd-buy-tabitem', function() {
-                        var $tabs = $(this).closest('.dd-buy-tabs');
-                        var target = String($(this).data('target'));
-                        $tabs.find('.dd-buy-tabitem').removeClass('active');
-                        $(this).addClass('active');
-                        $tabs.find('.dd-buy-tabpanel').each(function() {
-                            $(this).toggleClass('active', String($(this).data('panel')) === target);
-                        });
+                    // Sub-range group accordion inside the popup (delegated, as the content
+                    // is injected at open time). Single-open: opening one collapses the rest.
+                    $modal.on('click', '.dd-buy-acc-head', function() {
+                        var $item = $(this).closest('.dd-buy-acc-item');
+                        var $acc = $(this).closest('.dd-buy-acc');
+                        var wasOpen = $item.hasClass('is-open');
+                        $acc.find('.dd-buy-acc-item').removeClass('is-open')
+                            .find('.dd-buy-acc-head').attr('aria-expanded', 'false');
+                        if (!wasOpen) {
+                            $item.addClass('is-open');
+                            $(this).attr('aria-expanded', 'true');
+                        }
                     });
                 });
             })(jQuery);

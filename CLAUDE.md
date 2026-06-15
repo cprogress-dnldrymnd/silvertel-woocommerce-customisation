@@ -8,8 +8,9 @@ A single-file WordPress plugin (`silvertel-woocommerce-customisation.php`) that 
 WooCommerce for Silvertell. It adds an `evaluation-board` custom post type, a bespoke
 AJAX-chunked CSV importer that sideloads remote images while building hierarchical
 categories, an interceptor that sideloads files during native WooCommerce product
-imports, four custom product-data tabs, and a self-contained "native repeater" admin UI
-(no ACF or other field-plugin dependency).
+imports, four custom product-data tabs, a parent/child "Product Range" system for
+sub-range and variant products, and a self-contained "native repeater" admin UI (no ACF
+or other field-plugin dependency).
 
 ## Commands
 
@@ -68,6 +69,25 @@ The major subsystems:
   `_linked_documents`), **Features** (repeater → `_features`), and **Evaluation Boards**
   (multi-select → `_linked_eval_boards`) to the product editor.
 
+- **Child Products manager + Product Range frontend tab**: simple products can have a
+  `post_parent` (sub-range "group" products and orderable "variants"). On the parent
+  product's edit screen, `register_child_products_meta_box` shows the descendant tree
+  with Edit/Add Child/Delete; `print_child_product_modal` plus the
+  `silvertell_child_form` / `silvertell_child_save` / `silvertell_child_delete` AJAX
+  actions power a popup editor for Title, Description, Subtext (short description), SKU,
+  Categories, Attributes (pick a global/taxonomy attribute + term(s), or a custom
+  name/value pair), and Buy Samples. Saving assigns global-attribute terms via
+  `wp_set_object_terms`; deleting (`delete_product_branch`) is **permanent and
+  recursive** (`wp_delete_post($id, true)`, no trash). Children are hidden from the admin
+  Products list and status counts (`hide_child_products_from_list`,
+  `exclude_children_from_count`) and 301-redirect to their top-level ancestor on the
+  frontend (`redirect_child_product_pages`). `register_frontend_product_tabs` then adds a
+  "Product Range" tab (`build_product_range`) on the ancestor's page: L2 children with
+  their own children render as sub-range sections (heading/description/note + variant
+  table, grouped into sub-tabs by their "Product Range > X" category via
+  `get_product_range_subcategory`), L2 children without children render as flat variant
+  rows, and a childless product with attributes/buy links renders itself as one row.
+
 - **Meta boxes**: PDF config on `product-support` posts (`pdf_file` meta), and Evaluation
   Board details (`_unique_code`, `_manual`, and per-provider sample URLs).
 
@@ -75,6 +95,13 @@ The major subsystems:
   `silvertell_file_meta_keys` option (comma-separated meta keys the product-import
   interceptor will sideload) and the `silvertell_sample_providers` option (a repeater of
   name/meta-key/logo; defaults to Farnell/Mouser/Digikey).
+
+- **Other frontend single-product tabs** (`register_frontend_product_tabs`, on
+  `woocommerce_product_tabs`, priority 98): hides the Reviews tab, pushes "Additional
+  information" last, and conditionally adds "Documents" (from `_linked_documents`) and
+  "Evaluation Boards" (from `_linked_eval_boards`) tabs. Features are **not** a tab —
+  they render via the separate "Product Features" Elementor widget
+  (`register_elementor_widgets`).
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

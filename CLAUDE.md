@@ -111,9 +111,12 @@ The major subsystems:
   L1/L2/L3 structure) and merges each distributor's links into one logo whose popup lists
   every variant's link (labelled by variant title) — so a range parent like Ag9900, which
   has no links of its own, still shows the distributors. Each link keeps its `tab`
-  (sub-tab / "Product Range" subcategory) and `section` (sub-range group title), so the
-  popup prints grouping headings (e.g. *New Preferred Range > Ag9900-MTB*) instead of a
-  flat list. `render_provider_link_buttons` is the shared pill/popup HTML builder.
+  (sub-tab / "Product Range" subcategory) and `section` (sub-range group title). The popup
+  body (`build_buy_popup_content`) groups links by the deepest available label and, when
+  there are 2+ named groups, renders a **tab switcher** (the sub-range groups become tabs,
+  e.g. Ag9900M / Ag9900MT / Ag9900LP); otherwise a plain list (`build_buy_links_list`).
+  The popup tab JS is delegated off `#dd-buy-modal` since the content is injected at open
+  time. `render_provider_link_buttons` is the shared pill/popup HTML builder.
 
 - **Other frontend single-product tabs** (`register_frontend_product_tabs`, on
   `woocommerce_product_tabs`, priority 98): hides the Reviews tab, pushes "Additional

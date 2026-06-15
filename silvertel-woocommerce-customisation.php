@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.38.0
+ * Version: 2.39.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2499,39 +2499,73 @@ class Silvertell_Woocommerce_Customisation
                 // Single link: open it directly.
                 $out .= '<a class="' . $cls . '" href="' . esc_url($links[0]['url']) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($name) . '">' . $inner . '</a>';
             } else {
-                // Multiple links: a button that opens a popup list. The link list lives in
-                // an adjacent hidden span the modal JS copies from. Links carry optional
-                // range context ('tab' / 'section'); print each heading once as it changes,
-                // so the popup reflects the sub-tab / sub-range grouping.
-                $items    = '';
-                $cur_tab  = null;
-                $cur_sect = null;
-                foreach ($links as $link) {
-                    $tab     = isset($link['tab']) ? $link['tab'] : '';
-                    $section = isset($link['section']) ? $link['section'] : '';
-
-                    if ($tab !== $cur_tab) {
-                        if ($tab !== '') {
-                            $items .= '<li class="dd-buy-grp dd-buy-grp--tab">' . esc_html($tab) . '</li>';
-                        }
-                        $cur_tab  = $tab;
-                        $cur_sect = null; // section headings restart under each tab
-                    }
-                    if ($section !== $cur_sect) {
-                        if ($section !== '') {
-                            $items .= '<li class="dd-buy-grp dd-buy-grp--section">' . esc_html($section) . '</li>';
-                        }
-                        $cur_sect = $section;
-                    }
-
-                    $label  = $link['label'] !== '' ? $link['label'] : $link['url'];
-                    $items .= '<li><a href="' . esc_url($link['url']) . '" target="_blank" rel="noopener nofollow">' . esc_html($label) . '</a></li>';
-                }
+                // Multiple links: a button that opens a popup. The popup content lives in an
+                // adjacent hidden span the modal JS copies from.
+                $content = self::build_buy_popup_content($links);
                 $out .= '<button type="button" class="' . $cls . ' dd-buy-btn--multi" title="' . esc_attr($name) . '" aria-haspopup="dialog">' . $inner . '<span class="dd-buy-count">' . count($links) . '</span></button>';
-                $out .= '<span class="dd-buy-links-data" hidden data-provider="' . esc_attr($name) . '"><ul>' . $items . '</ul></span>';
+                $out .= '<span class="dd-buy-links-data" hidden data-provider="' . esc_attr($name) . '">' . $content . '</span>';
             }
         }
         return $out;
+    }
+
+    /**
+     * Build the popup body for a multi-link provider. Links carry range context
+     * ('section' = sub-range group title, 'tab' = sub-tab label); they are grouped by the
+     * deepest available label. With two or more named groups the body is a tab switcher
+     * (the sub-range groups become tabs, e.g. Ag9900M / Ag9900MT / Ag9900LP); otherwise it
+     * falls back to a plain list.
+     */
+    private static function build_buy_popup_content($links)
+    {
+        // Bucket links by their group label, preserving first-seen order.
+        $groups = [];
+        $order  = [];
+        foreach ($links as $link) {
+            $section = isset($link['section']) ? $link['section'] : '';
+            $tab     = isset($link['tab']) ? $link['tab'] : '';
+            $label   = $section !== '' ? $section : $tab; // '' when neither
+            if (! isset($groups[$label])) {
+                $groups[$label] = [];
+                $order[]        = $label;
+            }
+            $groups[$label][] = $link;
+        }
+
+        $named = array_values(array_filter($order, function ($k) {
+            return $k !== '';
+        }));
+
+        // Fewer than two named groups → a plain list is clearer than a single tab.
+        if (count($named) < 2) {
+            return self::build_buy_links_list($links);
+        }
+
+        $uid    = 'dd-buytab-' . substr(md5(implode('|', $order) . microtime()), 0, 8);
+        $nav    = '';
+        $panels = '';
+        $first  = true;
+        $i      = 0;
+        foreach ($order as $label) {
+            $panel_id = $uid . '-' . $i;
+            $display  = $label !== '' ? $label : __('Other', 'silvertell-wc-customisation');
+            $nav     .= '<li class="dd-buy-tabitem' . ($first ? ' active' : '') . '" data-target="' . esc_attr($panel_id) . '">' . esc_html($display) . '</li>';
+            $panels  .= '<div class="dd-buy-tabpanel' . ($first ? ' active' : '') . '" data-panel="' . esc_attr($panel_id) . '">' . self::build_buy_links_list($groups[$label]) . '</div>';
+            $first    = false;
+            $i++;
+        }
+        return '<div class="dd-buy-tabs"><ul class="dd-buy-tabnav">' . $nav . '</ul>' . $panels . '</div>';
+    }
+
+    /** A <ul> of buy links (label → URL). */
+    private static function build_buy_links_list($links)
+    {
+        $items = '';
+        foreach ($links as $link) {
+            $label  = $link['label'] !== '' ? $link['label'] : $link['url'];
+            $items .= '<li><a href="' . esc_url($link['url']) . '" target="_blank" rel="noopener nofollow">' . esc_html($label) . '</a></li>';
+        }
+        return '<ul>' . $items . '</ul>';
     }
 
     public function inject_frontend_assets()
@@ -2746,6 +2780,7 @@ class Silvertell_Woocommerce_Customisation
                 border: 1px solid #d5d9dd;
                 padding: 10px 18px;
                 box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+                height: auto;
             }
 
             .dd-buy-btn--logo:hover {
@@ -2863,35 +2898,43 @@ class Silvertell_Woocommerce_Customisation
                 margin: 0 0 8px;
             }
 
-            /* Range grouping headings inside the popup. */
-            .dd-buy-modal-list li.dd-buy-grp {
-                margin: 0;
+            /* Sub-range group tabs inside the popup. */
+            .dd-buy-tabnav {
+                list-style: none;
+                margin: 0 0 16px;
                 padding: 0;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                border-bottom: 1px solid #e0e0e0;
             }
 
-            .dd-buy-modal-list li.dd-buy-grp--tab {
-                margin: 18px 0 8px;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.04em;
-                text-transform: uppercase;
-                color: #0089FF;
-            }
-
-            .dd-buy-modal-list li.dd-buy-grp--tab:first-child {
-                margin-top: 0;
-            }
-
-            .dd-buy-modal-list li.dd-buy-grp--section {
-                margin: 12px 0 6px;
+            .dd-buy-tabnav li.dd-buy-tabitem {
+                list-style: none;
+                margin: 0 0 -1px;
+                padding: 0 0 8px;
+                cursor: pointer;
                 font-size: 13px;
                 font-weight: 600;
-                color: #333;
+                color: #777;
+                border-bottom: 2px solid transparent;
             }
 
-            /* A section sitting right under its tab heading shouldn't double the gap. */
-            .dd-buy-modal-list li.dd-buy-grp--tab + li.dd-buy-grp--section {
-                margin-top: 0;
+            .dd-buy-tabnav li.dd-buy-tabitem:hover {
+                color: #111;
+            }
+
+            .dd-buy-tabnav li.dd-buy-tabitem.active {
+                color: #111;
+                border-bottom-color: #0089FF;
+            }
+
+            .dd-buy-tabpanel {
+                display: none;
+            }
+
+            .dd-buy-tabpanel.active {
+                display: block;
             }
 
             .dd-buy-modal-list li a {
@@ -3137,6 +3180,18 @@ class Silvertell_Woocommerce_Customisation
                     $modal.on('click', '[data-dd-buy-close]', closeModal);
                     $(document).on('keydown', function(e) {
                         if (e.key === 'Escape' && $modal.hasClass('is-open')) closeModal();
+                    });
+
+                    // Sub-range group tabs inside the popup (delegated, as the content is
+                    // injected at open time).
+                    $modal.on('click', '.dd-buy-tabitem', function() {
+                        var $tabs = $(this).closest('.dd-buy-tabs');
+                        var target = String($(this).data('target'));
+                        $tabs.find('.dd-buy-tabitem').removeClass('active');
+                        $(this).addClass('active');
+                        $tabs.find('.dd-buy-tabpanel').each(function() {
+                            $(this).toggleClass('active', String($(this).data('panel')) === target);
+                        });
                     });
                 });
             })(jQuery);

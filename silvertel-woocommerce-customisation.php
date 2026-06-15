@@ -2200,7 +2200,7 @@ class Silvertell_Woocommerce_Customisation
                 position: absolute;
                 left: 0;
                 top: 0;
-                color: #28a745;
+                color: #0089FF;
                 font-weight: 700;
             }
 

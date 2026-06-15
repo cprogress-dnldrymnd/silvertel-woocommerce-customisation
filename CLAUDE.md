@@ -141,7 +141,8 @@ The major subsystems:
   `matchMedia` change, and reverts the DOM order back to the normal tab layout above
   768px. `.dd-range-table` and `.dd-eb-table` rows stack into cards, with each
   `<td data-label="...">` (set in `render_range_table` and `render_eb_board_table`)
-  becoming the row's visible label via CSS `::before`.
+  becoming the row's visible label via CSS `::before`. The `.dd-range-nav` sub-tab pills
+  (Product Range / Evaluation Boards sub-tabs) stack into full-width buttons.
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

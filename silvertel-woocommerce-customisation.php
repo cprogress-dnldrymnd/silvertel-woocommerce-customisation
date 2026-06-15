@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.2
+ * Version: 2.43.3
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3262,35 +3262,18 @@ class Silvertell_Woocommerce_Customisation
                 border-bottom-color: #2271b1;
             }
 
-            /* ---- Range sub-tab nav: full-width stacked pills below 768px ---- */
+            /* ---- Range sub-tab nav: same underlined tabs as desktop, just tighter ---- */
             @media (max-width: 768px) {
 
                 .dd-range-nav {
-                    flex-direction: column;
-                    flex-wrap: nowrap;
-                    gap: 8px;
-                    margin: 0 0 20px;
-                    border-bottom: 0;
+                    gap: 2px;
+                    margin-bottom: 18px;
                 }
 
                 .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item {
-                    width: 100%;
-                    box-sizing: border-box;
-                    text-align: center;
-                    padding: 12px 16px;
-                    margin-bottom: 0;
-                    border: 1px solid #e0e0e0;
-                    border-radius: 6px;
-                }
-
-                .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item:hover {
-                    background: #f6f7f7;
-                }
-
-                .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item.active {
-                    background: var(--e-global-color-c172edd);
-                    border-color: var(--e-global-color-c172edd);
-                    color: #fff;
+                    padding: 8px 12px;
+                    font-size: 12px;
+                    letter-spacing: 0;
                 }
             }
 

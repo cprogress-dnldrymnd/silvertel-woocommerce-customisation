@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.33.2
+ * Version: 2.33.3
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -708,7 +708,7 @@ class Silvertell_Woocommerce_Customisation
     {
         $row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
         $input_attr = $is_template ? 'disabled="disabled"' : '';
-        $logo_url   = is_numeric($logo) ? wp_get_attachment_image_url($logo, 'thumbnail') : $logo;
+        $logo_url   = is_numeric($logo) ? wp_get_attachment_url($logo) : $logo;
         $logo_disp  = $logo_url ? 'Logo Selected' : 'No Logo';
     ?>
         <div class="<?php echo esc_attr($row_class); ?>">
@@ -2057,7 +2057,7 @@ class Silvertell_Woocommerce_Customisation
             if (empty($url)) continue;
 
             $logo     = isset($provider['logo']) ? $provider['logo'] : '';
-            $logo_url = is_numeric($logo) ? wp_get_attachment_image_url($logo, 'full') : $logo;
+            $logo_url = is_numeric($logo) ? wp_get_attachment_url($logo) : $logo;
 
             if ($logo_url) {
                 // Logo present: show the logo only, inside a bordered pill (per the

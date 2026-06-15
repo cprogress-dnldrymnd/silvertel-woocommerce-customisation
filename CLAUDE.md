@@ -75,9 +75,11 @@ The major subsystems:
   with Edit/Add Child/Delete; `print_child_product_modal` plus the
   `silvertell_child_form` / `silvertell_child_save` / `silvertell_child_delete` AJAX
   actions power a popup editor for Title, Description, Subtext (short description), SKU,
-  Categories, Attributes (pick a global/taxonomy attribute + term(s), or a custom
-  name/value pair), and Buy Samples. Saving assigns global-attribute terms via
-  `wp_set_object_terms`; deleting (`delete_product_branch`) is **permanent and
+  Categories, Attributes (pick a global/taxonomy attribute + term(s) via a select2/
+  selectWoo multi-select with select-all/none and a "Create value" button that calls
+  WooCommerce's own `woocommerce_add_new_attribute` AJAX action, or a custom name/value
+  pair with `|`-separated values), and Buy Samples. Saving assigns global-attribute terms
+  via `wp_set_object_terms`; deleting (`delete_product_branch`) is **permanent and
   recursive** (`wp_delete_post($id, true)`, no trash). Children are hidden from the admin
   Products list and status counts (`hide_child_products_from_list`,
   `exclude_children_from_count`) and 301-redirect to their top-level ancestor on the
@@ -94,7 +96,10 @@ The major subsystems:
 - **Settings page** (*WooCommerce → Silvertell Settings*): edits the
   `silvertell_file_meta_keys` option (comma-separated meta keys the product-import
   interceptor will sideload) and the `silvertell_sample_providers` option (a repeater of
-  name/meta-key/logo; defaults to Farnell/Mouser/Digikey).
+  name/meta-key/logo; defaults to Farnell/Mouser/Digikey). `render_provider_buttons`
+  (shared by the Buy Samples tab and Product Range table) renders a logo-only bordered
+  pill (`.dd-buy-btn--logo`) when a provider has a logo, otherwise falls back to the
+  provider name with a cart icon.
 
 - **Other frontend single-product tabs** (`register_frontend_product_tabs`, on
   `woocommerce_product_tabs`, priority 98): hides the Reviews tab, pushes "Additional

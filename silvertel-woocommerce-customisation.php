@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.41.0
+ * Version: 2.42.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2556,14 +2556,15 @@ class Silvertell_Woocommerce_Customisation
                 $cur_tab = $group['tab'];
             }
 
-            $label = $group['label'] !== '' ? $group['label'] : __('Other', 'silvertell-wc-customisation');
-            $open  = $first ? ' is-open' : '';
+            $label      = $group['label'] !== '' ? $group['label'] : __('Other', 'silvertell-wc-customisation');
+            $open       = $first ? ' is-open' : '';
+            $body_style = $first ? ' style="display:block;"' : ''; // first open; lets the slide animate from here
             $html .= '<div class="dd-buy-acc-item' . $open . '">'
                 . '<button type="button" class="dd-buy-acc-head" aria-expanded="' . ($first ? 'true' : 'false') . '">'
                 . '<span class="dd-buy-acc-label">' . esc_html($label) . '</span>'
                 . '<span class="dd-buy-acc-icon" aria-hidden="true"></span>'
                 . '</button>'
-                . '<div class="dd-buy-acc-body">' . self::build_buy_links_list($group['links']) . '</div>'
+                . '<div class="dd-buy-acc-body"' . $body_style . '>' . self::build_buy_links_list($group['links']) . '</div>'
                 . '</div>';
             $first = false;
         }
@@ -2981,8 +2982,8 @@ class Silvertell_Woocommerce_Customisation
                 width: 8px;
                 height: 8px;
                 margin-top: -3px;
-                border-right: 2px solid #888;
-                border-bottom: 2px solid #888;
+                border-right: 2px solid currentColor;
+                border-bottom: 2px solid currentColor;
                 transform: rotate(45deg);
                 transition: transform 0.2s ease;
             }
@@ -2992,16 +2993,16 @@ class Silvertell_Woocommerce_Customisation
                 transform: rotate(-135deg);
             }
 
+            /* Hidden by default; visibility is driven by jQuery slideUp/slideDown (the open
+               item is rendered with an inline display:block so the slide can animate). The
+               .is-open class only drives the header/chevron styling, never display, so it
+               doesn't make jQuery treat the body as already-shown (which would skip the
+               animation). */
             .dd-buy-acc-body {
                 display: none;
-                padding: 10px 12px 2px;
                 border: 1px solid #e0e0e0;
                 border-top: 0;
                 border-radius: 0 0 6px 6px;
-            }
-
-            .dd-buy-acc-item.is-open .dd-buy-acc-body {
-                display: block;
             }
 
             /* Links inside an accordion body: a clean divided list, not nested pills. */

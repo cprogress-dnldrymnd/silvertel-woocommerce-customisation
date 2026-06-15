@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.36.0
+ * Version: 2.37.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2129,8 +2129,8 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Output the distributor "buy" links for a post (product or eval board), driven by
-     * the dynamic sample-provider config. A provider with a single link renders a direct
+     * Output the distributor "buy" links for a single post (product or eval board), driven
+     * by the dynamic sample-provider config. A provider with a single link renders a direct
      * anchor; a provider with multiple links renders a button that opens a popup list
      * (see the modal markup/JS in inject_frontend_assets). Returns '' when none are set.
      *
@@ -2138,13 +2138,90 @@ class Silvertell_Woocommerce_Customisation
      */
     public static function render_provider_buttons($post_id)
     {
+        $entries = [];
+        foreach (self::get_sample_providers() as $provider) {
+            $links = self::get_provider_links($post_id, $provider);
+            if (! empty($links)) {
+                $entries[] = ['provider' => $provider, 'links' => $links];
+            }
+        }
+        return self::render_provider_link_buttons($entries);
+    }
+
+    /**
+     * Like render_provider_buttons(), but for a whole product "range": it aggregates the
+     * links from the product itself and every descendant variant, grouped per provider.
+     * Each link is labelled by its own label if set, otherwise by the source product's
+     * title (e.g. the variant part number). So a range parent (which has no links of its
+     * own) still shows each distributor's logo once, and clicking it lists every variant's
+     * link for that distributor. Duplicate URLs are collapsed.
+     */
+    public static function render_aggregated_provider_buttons($product_id)
+    {
+        $sources = self::collect_range_product_ids($product_id);
+
+        $entries = [];
+        foreach (self::get_sample_providers() as $provider) {
+            $links = [];
+            $seen  = [];
+            foreach ($sources as $src) {
+                foreach (self::get_provider_links($src, $provider) as $link) {
+                    if (isset($seen[$link['url']])) continue;
+                    $seen[$link['url']] = true;
+                    $label   = $link['label'] !== '' ? $link['label'] : get_the_title($src);
+                    $links[] = ['label' => $label, 'url' => $link['url']];
+                }
+            }
+            if (! empty($links)) {
+                $entries[] = ['provider' => $provider, 'links' => $links];
+            }
+        }
+        return self::render_provider_link_buttons($entries);
+    }
+
+    /**
+     * Product IDs that make up a range: the product itself plus every descendant product
+     * (breadth-first, so the parent's own links come first), used to aggregate buy links.
+     */
+    private static function collect_range_product_ids($product_id)
+    {
+        $ids   = [(int) $product_id];
+        $queue = [(int) $product_id];
+
+        while (! empty($queue)) {
+            $current  = array_shift($queue);
+            $children = get_posts([
+                'post_type'   => 'product',
+                'post_status' => 'publish',
+                'post_parent' => $current,
+                'numberposts' => -1,
+                'fields'      => 'ids',
+                'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
+            ]);
+            foreach ($children as $cid) {
+                $ids[]   = (int) $cid;
+                $queue[] = (int) $cid;
+            }
+        }
+        return $ids;
+    }
+
+    /**
+     * Render the distributor pills from a list of ['provider' => , 'links' => [...]] entries.
+     * Shared by render_provider_buttons() (single post) and render_aggregated_provider_buttons()
+     * (a whole range). Single-link providers are a direct anchor; multi-link providers are a
+     * button that opens the popup list. Returns '' when there are no entries.
+     */
+    private static function render_provider_link_buttons($entries)
+    {
+        if (empty($entries)) return '';
+
         $cart_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-cart3" viewBox="0 0 16 16"> <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .49.598l-1 5a.5.5 0 0 1-.465.401l-9.397.472L4.415 11H13a.5.5 0 0 1 0 1H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5M3.102 4l.84 4.479 9.144-.459L13.89 4zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4m7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4m-7 1a1 1 0 1 1 0 2 1 1 0 0 1 0-2m7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/> </svg>';
 
         $out = '';
-        foreach (self::get_sample_providers() as $provider) {
-            $links = self::get_provider_links($post_id, $provider);
-            if (empty($links)) continue;
-
+        foreach ($entries as $entry) {
+            $provider = $entry['provider'];
+            $links    = $entry['links'];
             $name     = $provider['name'];
             $logo     = isset($provider['logo']) ? $provider['logo'] : '';
             $logo_url = is_numeric($logo) ? wp_get_attachment_url($logo) : $logo;
@@ -3617,7 +3694,7 @@ function silvertell_define_buy_samples_elementor_widget()
 
             $this->add_control('no_links_notice', [
                 'type'            => \Elementor\Controls_Manager::RAW_HTML,
-                'raw'             => __('This widget outputs the current product\'s distributor buy links (set on the product\'s Buy Samples tab in wp-admin). It is only visible when the product has at least one link.', 'silvertell-wc-customisation'),
+                'raw'             => __('This widget outputs the distributor buy links for the current product and all its variants (set on each product\'s Buy Samples tab in wp-admin). Each distributor shows once; clicking it lists every variant\'s link. Only visible when there is at least one link.', 'silvertell-wc-customisation'),
                 'content_classes' => 'elementor-descriptor',
             ]);
 
@@ -3637,10 +3714,12 @@ function silvertell_define_buy_samples_elementor_widget()
                 return;
             }
 
-            $buttons = Silvertell_Woocommerce_Customisation::render_provider_buttons($current->get_id());
+            // Aggregate the product's own links plus every variant's, so a range parent
+            // (Ag9900) still shows each distributor once with all the variant links in the popup.
+            $buttons = Silvertell_Woocommerce_Customisation::render_aggregated_provider_buttons($current->get_id());
             if ($buttons === '') {
                 if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
-                    echo '<p>' . esc_html__('This product has no buy links yet.', 'silvertell-wc-customisation') . '</p>';
+                    echo '<p>' . esc_html__('This product (and its variants) have no buy links yet.', 'silvertell-wc-customisation') . '</p>';
                 }
                 return;
             }

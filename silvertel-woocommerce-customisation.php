@@ -2264,6 +2264,7 @@ class Silvertell_Woocommerce_Customisation
                 max-height: 22px;
                 width: auto;
                 display: block;
+                height: 22px;
             }
 
             .dd-eb-card {

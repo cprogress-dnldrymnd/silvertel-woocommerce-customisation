@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.35.0
+ * Version: 2.36.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -62,7 +62,7 @@ class Silvertell_Woocommerce_Customisation
         add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs'], 98);
         add_action('wp_footer', [$this, 'inject_frontend_assets']);
 
-        // Elementor: register the standalone "Product Features" widget.
+        // Elementor: register the standalone "Product Features" and "Buy Samples" widgets.
         add_action('elementor/widgets/register', [$this, 'register_elementor_widgets']);
 
         // Child products (sub-range groups / variants) live inside their parent's page,
@@ -650,7 +650,7 @@ class Silvertell_Woocommerce_Customisation
         return $providers;
     }
 
-    private function get_sample_providers()
+    private static function get_sample_providers()
     {
         $defaults = [
             ['name' => 'Farnell', 'meta_key' => '_farnell_url', 'logo' => ''],
@@ -762,13 +762,27 @@ class Silvertell_Woocommerce_Customisation
     {
         global $post;
 
-        // Tab 1: Buy Samples
-        echo '<div id="silvertell_buy_samples_data" class="panel woocommerce_options_panel">';
+        // Tab 1: Buy Samples — a per-provider repeater of labelled purchase links.
+        echo '<div id="silvertell_buy_samples_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
         $providers = $this->get_sample_providers();
         if (! empty($providers)) {
+            echo '<div class="options_group" style="padding:12px 12px 4px;">';
+            echo '<p class="description" style="margin:0 0 14px;">' . esc_html__('Add one or more purchase links per distributor. On the product page a distributor with a single link opens it directly; with multiple links the logo opens a popup list.', 'silvertell-wc-customisation') . '</p>';
             foreach ($providers as $provider) {
-                woocommerce_wp_text_input(['id' => esc_attr($provider['meta_key']), 'label' => esc_html($provider['name']), 'type'  => 'url']);
+                $key   = $provider['meta_key'];
+                $links = $this->get_provider_links($post->ID, $provider);
+                echo '<div class="dd-buy-provider" style="margin-bottom:22px;">';
+                echo '<div class="dd-repeater-header-title"><strong>' . esc_html($provider['name']) . '</strong></div>';
+                echo '<div class="dd-repeater-container" data-type="buy_links">';
+                foreach ($links as $link) {
+                    $this->render_buy_link_row($key, $link['label'], $link['url'], false);
+                }
+                $this->render_buy_link_row($key, '', '', true);
+                echo '</div>';
+                echo '<div class="dd-repeater-footer"><button type="button" class="button button-secondary dd-add-row">' . esc_html__('Add Link', 'silvertell-wc-customisation') . '</button></div>';
+                echo '</div>';
             }
+            echo '</div>';
         } else {
             echo '<p style="padding:15px;">No sample providers configured. Add them in WooCommerce > Silvertell Settings.</p>';
         }
@@ -1140,7 +1154,10 @@ class Silvertell_Woocommerce_Customisation
         <div class="dd-modal-field">
             <label><?php esc_html_e('Buy Samples', 'silvertell-wc-customisation'); ?></label>
             <?php foreach ($this->get_sample_providers() as $provider) :
-                $val = $child_id ? get_post_meta($child_id, $provider['meta_key'], true) : ''; ?>
+                // The modal stores a single URL per provider; coerce in case the product
+                // also has a multi-link array from the full-editor Buy Samples tab.
+                $links = $child_id ? $this->get_provider_links($child_id, $provider) : [];
+                $val   = ! empty($links) ? $links[0]['url'] : ''; ?>
                 <div class="dd-modal-subfield">
                     <span class="dd-modal-sublabel"><?php echo esc_html($provider['name']); ?></span>
                     <input type="url" name="buy_samples[<?php echo esc_attr($provider['meta_key']); ?>]" class="dd-full-width" value="<?php echo esc_attr($val); ?>">
@@ -1685,9 +1702,13 @@ class Silvertell_Woocommerce_Customisation
         // declaring a class inside a class method) that runs lazily here, once
         // Elementor's base class is guaranteed to exist.
         silvertell_define_features_elementor_widget();
+        silvertell_define_buy_samples_elementor_widget();
 
         if (class_exists('Silvertell_Features_Elementor_Widget')) {
             $widgets_manager->register(new Silvertell_Features_Elementor_Widget());
+        }
+        if (class_exists('Silvertell_Buy_Samples_Elementor_Widget')) {
+            $widgets_manager->register(new Silvertell_Buy_Samples_Elementor_Widget());
         }
     }
 
@@ -2084,26 +2105,73 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Output the distributor "buy" links for a post (product or eval board), driven by
-     * the dynamic sample-provider config. Returns a string (empty when none are set).
+     * Normalise a post's stored "buy samples" value for one provider into a list of
+     * ['label' => , 'url' => ] rows. Supports both the new repeater array format and the
+     * legacy single-URL string still written by the eval-board meta box and child modal.
      */
-    private function render_provider_buttons($post_id)
+    private static function get_provider_links($post_id, $provider)
     {
-        $out = '';
-        foreach ($this->get_sample_providers() as $provider) {
-            $url = get_post_meta($post_id, $provider['meta_key'], true);
-            if (empty($url)) continue;
+        $raw   = get_post_meta($post_id, $provider['meta_key'], true);
+        $links = [];
 
+        if (is_array($raw)) {
+            foreach ($raw as $row) {
+                if (! is_array($row)) continue;
+                $url = isset($row['url']) ? trim($row['url']) : '';
+                if ($url === '') continue;
+                $links[] = ['label' => isset($row['label']) ? $row['label'] : '', 'url' => $url];
+            }
+        } elseif (is_string($raw) && trim($raw) !== '') {
+            $links[] = ['label' => '', 'url' => trim($raw)];
+        }
+
+        return $links;
+    }
+
+    /**
+     * Output the distributor "buy" links for a post (product or eval board), driven by
+     * the dynamic sample-provider config. A provider with a single link renders a direct
+     * anchor; a provider with multiple links renders a button that opens a popup list
+     * (see the modal markup/JS in inject_frontend_assets). Returns '' when none are set.
+     *
+     * Static so the "Buy Samples" Elementor widget can call it without an instance.
+     */
+    public static function render_provider_buttons($post_id)
+    {
+        $cart_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-cart3" viewBox="0 0 16 16"> <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .49.598l-1 5a.5.5 0 0 1-.465.401l-9.397.472L4.415 11H13a.5.5 0 0 1 0 1H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5M3.102 4l.84 4.479 9.144-.459L13.89 4zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4m7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4m-7 1a1 1 0 1 1 0 2 1 1 0 0 1 0-2m7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/> </svg>';
+
+        $out = '';
+        foreach (self::get_sample_providers() as $provider) {
+            $links = self::get_provider_links($post_id, $provider);
+            if (empty($links)) continue;
+
+            $name     = $provider['name'];
             $logo     = isset($provider['logo']) ? $provider['logo'] : '';
             $logo_url = is_numeric($logo) ? wp_get_attachment_url($logo) : $logo;
 
             if ($logo_url) {
-                // Logo present: show the logo only, inside a bordered pill (per the
-                // distributor button design).
-                $out .= '<a class="dd-buy-btn dd-buy-btn--logo" href="' . esc_url($url) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($provider['name']) . '"><img src="' . esc_url($logo_url) . '" alt="' . esc_attr($provider['name']) . '" /></a>';
+                // Logo present: show the logo only, inside a bordered pill.
+                $inner = '<img src="' . esc_url($logo_url) . '" alt="' . esc_attr($name) . '" />';
+                $cls   = 'dd-buy-btn dd-buy-btn--logo';
             } else {
                 // No logo: fall back to the provider name with a cart icon.
-                $out .= '<a class="dd-buy-btn" href="' . esc_url($url) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($provider['name']) . '"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-cart3" viewBox="0 0 16 16"> <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .49.598l-1 5a.5.5 0 0 1-.465.401l-9.397.472L4.415 11H13a.5.5 0 0 1 0 1H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5M3.102 4l.84 4.479 9.144-.459L13.89 4zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4m7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4m-7 1a1 1 0 1 1 0 2 1 1 0 0 1 0-2m7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/> </svg>' . esc_html($provider['name']) . '</a>';
+                $inner = $cart_svg . esc_html($name);
+                $cls   = 'dd-buy-btn';
+            }
+
+            if (count($links) === 1) {
+                // Single link: open it directly.
+                $out .= '<a class="' . $cls . '" href="' . esc_url($links[0]['url']) . '" target="_blank" rel="noopener nofollow" title="' . esc_attr($name) . '">' . $inner . '</a>';
+            } else {
+                // Multiple links: a button that opens a popup list. The link list lives in
+                // an adjacent hidden span the modal JS copies from.
+                $items = '';
+                foreach ($links as $link) {
+                    $label  = $link['label'] !== '' ? $link['label'] : $link['url'];
+                    $items .= '<li><a href="' . esc_url($link['url']) . '" target="_blank" rel="noopener nofollow">' . esc_html($label) . '</a></li>';
+                }
+                $out .= '<button type="button" class="' . $cls . ' dd-buy-btn--multi" title="' . esc_attr($name) . '" aria-haspopup="dialog">' . $inner . '<span class="dd-buy-count">' . count($links) . '</span></button>';
+                $out .= '<span class="dd-buy-links-data" hidden data-provider="' . esc_attr($name) . '"><ul>' . $items . '</ul></span>';
             }
         }
         return $out;
@@ -2336,6 +2404,125 @@ class Silvertell_Woocommerce_Customisation
                 height: 22px;
             }
 
+            /* Multi-link distributor pill: a <button> styled like the anchor pills. */
+            button.dd-buy-btn {
+                font: inherit;
+                cursor: pointer;
+                border: 0;
+            }
+
+            button.dd-buy-btn--logo {
+                border: 1px solid #d5d9dd;
+            }
+
+            .dd-buy-btn--multi {
+                position: relative;
+            }
+
+            .dd-buy-count {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 18px;
+                height: 18px;
+                margin-left: 8px;
+                padding: 0 5px;
+                border-radius: 9px;
+                background: #0089FF;
+                color: #fff;
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1;
+            }
+
+            .dd-buy-links-data {
+                display: none !important;
+            }
+
+            /* ---- Buy Samples popup ---- */
+            .dd-buy-modal {
+                position: fixed;
+                inset: 0;
+                z-index: 99999;
+                display: none;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .dd-buy-modal.is-open {
+                display: flex;
+            }
+
+            .dd-buy-modal-overlay {
+                position: absolute;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.5);
+            }
+
+            .dd-buy-modal-box {
+                position: relative;
+                background: #fff;
+                border-radius: 8px;
+                width: calc(100% - 40px);
+                max-width: 420px;
+                max-height: 80vh;
+                overflow: auto;
+                padding: 26px 26px 20px;
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+            }
+
+            .dd-buy-modal-title {
+                margin: 0 0 16px;
+                font-size: 18px;
+                padding-right: 24px;
+            }
+
+            .dd-buy-modal-close {
+                position: absolute;
+                top: 12px;
+                right: 14px;
+                border: 0;
+                background: none;
+                font-size: 24px;
+                line-height: 1;
+                cursor: pointer;
+                color: #777;
+            }
+
+            .dd-buy-modal-close:hover {
+                color: #111;
+            }
+
+            .dd-buy-modal-list ul {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+
+            .dd-buy-modal-list li {
+                margin: 0 0 8px;
+            }
+
+            .dd-buy-modal-list li a {
+                display: block;
+                padding: 12px 16px;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                color: #111;
+                text-decoration: none;
+                word-break: break-word;
+                transition: border-color 0.15s, background 0.15s;
+            }
+
+            .dd-buy-modal-list li a:hover {
+                border-color: #0089FF;
+                background: #f5faff;
+            }
+
+            body.dd-buy-modal-open {
+                overflow: hidden;
+            }
+
             .dd-eb-card {
                 display: flex;
                 flex-wrap: wrap;
@@ -2510,6 +2697,51 @@ class Silvertell_Woocommerce_Customisation
                 });
             })(jQuery);
         </script>
+
+        <div class="dd-buy-modal" id="dd-buy-modal" role="dialog" aria-modal="true" aria-hidden="true">
+            <div class="dd-buy-modal-overlay" data-dd-buy-close></div>
+            <div class="dd-buy-modal-box">
+                <button type="button" class="dd-buy-modal-close" data-dd-buy-close aria-label="<?php esc_attr_e('Close', 'silvertell-wc-customisation'); ?>">&times;</button>
+                <h3 class="dd-buy-modal-title"></h3>
+                <div class="dd-buy-modal-list"></div>
+            </div>
+        </div>
+        <script>
+            /* Buy Samples popup: a distributor logo with multiple purchase links opens a
+               modal listing them (single-link logos still navigate directly). */
+            (function ($) {
+                $(function () {
+                    var $modal = $('#dd-buy-modal');
+                    if (!$modal.length) return;
+
+                    function openModal(provider, listHtml) {
+                        var title = provider
+                            ? provider + ' — <?php echo esc_js(__('choose a part', 'silvertell-wc-customisation')); ?>'
+                            : '<?php echo esc_js(__('Choose a part', 'silvertell-wc-customisation')); ?>';
+                        $modal.find('.dd-buy-modal-title').text(title);
+                        $modal.find('.dd-buy-modal-list').html(listHtml);
+                        $modal.addClass('is-open').attr('aria-hidden', 'false');
+                        $('body').addClass('dd-buy-modal-open');
+                    }
+
+                    function closeModal() {
+                        $modal.removeClass('is-open').attr('aria-hidden', 'true');
+                        $('body').removeClass('dd-buy-modal-open');
+                    }
+
+                    $(document).on('click', '.dd-buy-btn--multi', function (e) {
+                        e.preventDefault();
+                        var $data = $(this).next('.dd-buy-links-data');
+                        openModal($data.data('provider'), $data.html());
+                    });
+
+                    $modal.on('click', '[data-dd-buy-close]', closeModal);
+                    $(document).on('keydown', function (e) {
+                        if (e.key === 'Escape' && $modal.hasClass('is-open')) closeModal();
+                    });
+                });
+            })(jQuery);
+        </script>
     <?php
     }
 
@@ -2539,6 +2771,43 @@ class Silvertell_Woocommerce_Customisation
             echo '</span>';
         }
         echo '</p></div>';
+    }
+
+    /**
+     * Render one "Buy Samples" link row (label + URL) for a provider's repeater on the
+     * product editor. Inputs are named buy_links[<meta_key>][label][] / [url][].
+     */
+    private function render_buy_link_row($meta_key, $label = '', $url = '', $is_template = false)
+    {
+        $row_class  = $is_template ? 'dd-repeater-row dd-template' : 'dd-repeater-row';
+        $input_attr = $is_template ? 'disabled="disabled"' : '';
+        $base       = 'buy_links[' . $meta_key . ']';
+        $title      = $label !== '' ? $label : ($url !== '' ? $url : 'New Link');
+    ?>
+        <div class="<?php echo esc_attr($row_class); ?>">
+            <div class="dd-repeater-header">
+                <div class="dd-header-left">
+                    <span class="dashicons dashicons-menu dd-drag-handle"></span>
+                    <span class="dd-row-title"><?php echo esc_html($title); ?></span>
+                </div>
+                <div class="dd-header-right dd-repeater-actions">
+                    <span class="dashicons dashicons-arrow-down-alt2 dd-collapse-row" title="Toggle"></span>
+                    <span class="dashicons dashicons-admin-page dd-duplicate-row" title="Duplicate"></span>
+                    <span class="dashicons dashicons-trash dd-delete-row" title="Delete"></span>
+                </div>
+            </div>
+            <div class="dd-repeater-content">
+                <div class="dd-field-group">
+                    <label><?php esc_html_e('Label (e.g. part number — shown in the popup)', 'silvertell-wc-customisation'); ?></label>
+                    <input type="text" name="<?php echo esc_attr($base); ?>[label][]" class="dd-bind-title dd-full-width" value="<?php echo esc_attr($label); ?>" <?php echo $input_attr; ?> />
+                </div>
+                <div class="dd-field-group">
+                    <label><?php esc_html_e('URL', 'silvertell-wc-customisation'); ?></label>
+                    <input type="url" name="<?php echo esc_attr($base); ?>[url][]" class="dd-full-width" value="<?php echo esc_attr($url); ?>" <?php echo $input_attr; ?> />
+                </div>
+            </div>
+        </div>
+    <?php
     }
 
     private function render_feature_row($feature = '', $is_template = false)
@@ -2572,12 +2841,33 @@ class Silvertell_Woocommerce_Customisation
     {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
 
-        // 1. Save Dynamic Buy Samples
-        $providers = $this->get_sample_providers();
-        foreach ($providers as $provider) {
-            $field = $provider['meta_key'];
-            if (isset($_POST[$field])) {
-                update_post_meta($post_id, $field, sanitize_url(wp_unslash($_POST[$field])));
+        // 1. Save Dynamic Buy Samples — a per-provider list of labelled purchase links.
+        //    Only touched when the editor actually submitted the repeater (buy_links),
+        //    so it never clobbers single-URL values set via other UIs (eval boards / child modal).
+        if (isset($_POST['buy_links']) && is_array($_POST['buy_links'])) {
+            $providers = $this->get_sample_providers();
+            $buy_links = wp_unslash($_POST['buy_links']);
+            foreach ($providers as $provider) {
+                $key  = $provider['meta_key'];
+                $rows = [];
+                if (isset($buy_links[$key]) && is_array($buy_links[$key])) {
+                    $labels = isset($buy_links[$key]['label']) ? (array) $buy_links[$key]['label'] : [];
+                    $urls   = isset($buy_links[$key]['url'])   ? (array) $buy_links[$key]['url']   : [];
+                    $count  = max(count($labels), count($urls));
+                    for ($i = 0; $i < $count; $i++) {
+                        $url = isset($urls[$i]) ? esc_url_raw(trim($urls[$i])) : '';
+                        if ($url === '') continue;
+                        $rows[] = [
+                            'label' => isset($labels[$i]) ? sanitize_text_field($labels[$i]) : '',
+                            'url'   => $url,
+                        ];
+                    }
+                }
+                if (! empty($rows)) {
+                    update_post_meta($post_id, $key, $rows);
+                } else {
+                    delete_post_meta($post_id, $key);
+                }
             }
         }
 
@@ -3254,6 +3544,117 @@ function silvertell_define_features_elementor_widget()
                 echo '<' . $tag . ' class="dd-features-widget-title">' . esc_html($heading) . '</' . $tag . '>';
             }
             echo $html; // already escaped in get_features_list_html()
+            echo '</div>';
+        }
+    }
+}
+
+/**
+ * Declare the "Buy Samples" Elementor widget class.
+ *
+ * Mirrors the Product Features widget: a top-level function (PHP forbids nesting a class
+ * in a method) called lazily from register_elementor_widgets() once Elementor's base
+ * class exists. Outputs the current product's distributor buy links; a distributor with
+ * multiple links opens a popup list (see render_provider_buttons + inject_frontend_assets).
+ */
+function silvertell_define_buy_samples_elementor_widget()
+{
+    if (class_exists('Silvertell_Buy_Samples_Elementor_Widget')) return;
+    if (! class_exists('\Elementor\Widget_Base')) return;
+
+    class Silvertell_Buy_Samples_Elementor_Widget extends \Elementor\Widget_Base
+    {
+        public function get_name()
+        {
+            return 'silvertell_buy_samples';
+        }
+
+        public function get_title()
+        {
+            return __('Buy Samples', 'silvertell-wc-customisation');
+        }
+
+        public function get_icon()
+        {
+            return 'eicon-cart-medium';
+        }
+
+        public function get_categories()
+        {
+            return ['woocommerce-elements-single', 'woocommerce-elements', 'general'];
+        }
+
+        public function get_keywords()
+        {
+            return ['buy', 'samples', 'distributor', 'product', 'woocommerce', 'silvertell'];
+        }
+
+        protected function register_controls()
+        {
+            $this->start_controls_section('content_section', [
+                'label' => __('Content', 'silvertell-wc-customisation'),
+                'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
+            ]);
+
+            $this->add_control('heading', [
+                'label'       => __('Heading', 'silvertell-wc-customisation'),
+                'type'        => \Elementor\Controls_Manager::TEXT,
+                'default'     => __('Buy Samples', 'silvertell-wc-customisation'),
+                'placeholder' => __('Leave blank to hide the heading', 'silvertell-wc-customisation'),
+                'label_block' => true,
+            ]);
+
+            $this->add_control('heading_tag', [
+                'label'   => __('Heading HTML Tag', 'silvertell-wc-customisation'),
+                'type'    => \Elementor\Controls_Manager::SELECT,
+                'default' => 'h3',
+                'options' => [
+                    'h1' => 'H1', 'h2' => 'H2', 'h3' => 'H3',
+                    'h4' => 'H4', 'h5' => 'H5', 'h6' => 'H6',
+                ],
+                'condition' => ['heading!' => ''],
+            ]);
+
+            $this->add_control('no_links_notice', [
+                'type'            => \Elementor\Controls_Manager::RAW_HTML,
+                'raw'             => __('This widget outputs the current product\'s distributor buy links (set on the product\'s Buy Samples tab in wp-admin). It is only visible when the product has at least one link.', 'silvertell-wc-customisation'),
+                'content_classes' => 'elementor-descriptor',
+            ]);
+
+            $this->end_controls_section();
+        }
+
+        protected function render()
+        {
+            if (! function_exists('wc_get_product')) return;
+
+            global $product;
+            $current = $product instanceof WC_Product ? $product : wc_get_product(get_the_ID());
+            if (! $current instanceof WC_Product) {
+                if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
+                    echo '<p>' . esc_html__('No product in context — preview on a product page.', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            $buttons = Silvertell_Woocommerce_Customisation::render_provider_buttons($current->get_id());
+            if ($buttons === '') {
+                if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
+                    echo '<p>' . esc_html__('This product has no buy links yet.', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            $settings = $this->get_settings_for_display();
+            $heading  = isset($settings['heading']) ? trim($settings['heading']) : '';
+
+            echo '<div class="dd-buy-samples-widget">';
+            if ($heading !== '') {
+                $tag = isset($settings['heading_tag']) ? $settings['heading_tag'] : 'h3';
+                $tag = in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true) ? $tag : 'h3';
+                echo '<' . $tag . ' class="dd-buy-samples-widget-title">' . esc_html($heading) . '</' . $tag . '>';
+            }
+            echo '<div class="dd-buy-wrap">' . $buttons . '</div>'; // buttons already escaped
             echo '</div>';
         }
     }

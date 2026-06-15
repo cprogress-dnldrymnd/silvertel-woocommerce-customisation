@@ -97,16 +97,24 @@ The major subsystems:
   `silvertell_file_meta_keys` option (comma-separated meta keys the product-import
   interceptor will sideload) and the `silvertell_sample_providers` option (a repeater of
   name/meta-key/logo; defaults to Farnell/Mouser/Digikey). `render_provider_buttons`
-  (shared by the Buy Samples tab and Product Range table) renders a logo-only bordered
-  pill (`.dd-buy-btn--logo`) when a provider has a logo, otherwise falls back to the
-  provider name with a cart icon.
+  (static; shared by the Buy Samples Elementor widget, eval-board card, and Product Range
+  table) renders a logo-only bordered pill (`.dd-buy-btn--logo`) when a provider has a
+  logo, otherwise falls back to the provider name with a cart icon. Each provider can hold
+  **multiple labelled links** per product (a repeater on the product's Buy Samples tab,
+  stored as an array of `['label','url']` under the provider meta key — `get_provider_links`
+  normalises both that array and the legacy single-URL string written by the eval-board
+  meta box / child modal). A provider with one link is a direct anchor; with several, the
+  pill becomes a `<button class="dd-buy-btn--multi">` that opens the `.dd-buy-modal` popup
+  (markup/CSS/JS injected by `inject_frontend_assets`).
 
 - **Other frontend single-product tabs** (`register_frontend_product_tabs`, on
   `woocommerce_product_tabs`, priority 98): hides the Reviews tab, pushes "Additional
   information" last, and conditionally adds "Documents" (from `_linked_documents`) and
   "Evaluation Boards" (from `_linked_eval_boards`) tabs. Features are **not** a tab —
-  they render via the separate "Product Features" Elementor widget
-  (`register_elementor_widgets`). The Evaluation Boards tab
+  they render via the separate "Product Features" Elementor widget; the distributor "Buy
+  Samples" block is likewise its own Elementor widget (both registered in
+  `register_elementor_widgets`, defined by top-level `silvertell_define_*_elementor_widget`
+  functions). The Evaluation Boards tab
   (`render_evaluation_boards_tab`) renders a card per linked board
   (`render_eval_board_card`), plus a variant table for each board's orderable children
   grouped by `evaluation-board-category` (`render_eval_board_children_table` →

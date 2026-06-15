@@ -3011,7 +3011,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-buy-modal-list .dd-buy-acc-body li a {
-                padding: 9px 4px;
+                padding: 11px;
                 border: 0;
                 border-radius: 0;
                 border-bottom: 1px solid #eee;
@@ -3024,7 +3024,6 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-buy-modal-list .dd-buy-acc-body li a:hover {
-                border-color: transparent;
                 background: #f5faff;
             }
 

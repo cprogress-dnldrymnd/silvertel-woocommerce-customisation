@@ -87,8 +87,10 @@ The major subsystems:
   "Product Range" tab (`build_product_range`) on the ancestor's page: L2 children with
   their own children render as sub-range sections (heading/description/note + variant
   table, grouped into sub-tabs by their "Product Range > X" category via
-  `get_product_range_subcategory`), L2 children without children render as flat variant
-  rows, and a childless product with attributes/buy links renders itself as one row.
+  `get_product_range_subcategory` — but only when there's more than one group; a single
+  group renders its sections inline with no lone tab), L2 children without children render
+  as flat variant rows, and a childless product with attributes/buy links renders itself
+  as one row.
 
 - **Meta boxes**: PDF config on `product-support` posts (`pdf_file` meta), and Evaluation
   Board details (`_unique_code`, `_manual`, and per-provider sample URLs).

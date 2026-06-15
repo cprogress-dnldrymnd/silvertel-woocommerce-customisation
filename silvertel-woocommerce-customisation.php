@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.1
+ * Version: 2.43.2
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2122,13 +2122,12 @@ class Silvertell_Woocommerce_Customisation
         echo '<div class="dd-tab-content dd-product-range-tab">';
 
         if (! empty($range['groups'])) {
-            $labels = array_keys($range['groups']);
-            $has_subtabs = (count($labels) > 1) || ($labels !== ['']);
-
-            if ($has_subtabs) {
+            // Only show the sub-tab switcher when there's genuinely more than one group;
+            // a lone "Extended Range" tab looks broken, so render its sections directly.
+            if (count($range['groups']) > 1) {
                 $this->render_range_subtabs($range['groups']);
             } else {
-                foreach ($range['groups'][''] as $section) {
+                foreach (reset($range['groups']) as $section) {
                     $this->render_range_section($section);
                 }
             }
@@ -3430,8 +3429,14 @@ class Silvertell_Woocommerce_Customisation
 
                         $tabsList.on('click', '> li', function(e) {
                             e.preventDefault();
-                            if (isAccordion) toggleAccordion($(this));
-                            else showTab($(this));
+                            if (isAccordion) {
+                                // Block WooCommerce's own tab handler (delegated on
+                                // document) so it can't re-open the panel we just closed.
+                                e.stopPropagation();
+                                toggleAccordion($(this));
+                            } else {
+                                showTab($(this));
+                            }
                         });
                     });
 

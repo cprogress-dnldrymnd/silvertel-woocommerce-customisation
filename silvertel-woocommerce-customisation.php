@@ -3235,7 +3235,7 @@ class Silvertell_Woocommerce_Customisation
                 border-bottom: 1px solid #e0e0e0;
             }
 
-            .dd-range-nav-item {
+            .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item {
                 cursor: pointer;
                 padding: 12px 22px;
                 font-weight: 600;
@@ -3250,12 +3250,12 @@ class Silvertell_Woocommerce_Customisation
                 transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
             }
 
-            .dd-range-nav-item:hover {
+            .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item:hover {
                 color: #2271b1;
                 background: #f6f7f7;
             }
 
-            .dd-range-nav-item.active {
+            .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item.active {
                 color: #2271b1;
                 background: #fff;
                 border-color: #e0e0e0;
@@ -3273,7 +3273,7 @@ class Silvertell_Woocommerce_Customisation
                     border-bottom: 0;
                 }
 
-                .dd-range-nav-item {
+                .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item {
                     width: 100%;
                     box-sizing: border-box;
                     text-align: center;
@@ -3283,11 +3283,11 @@ class Silvertell_Woocommerce_Customisation
                     border-radius: 6px;
                 }
 
-                .dd-range-nav-item:hover {
+                .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item:hover {
                     background: #f6f7f7;
                 }
 
-                .dd-range-nav-item.active {
+                .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item.active {
                     background: var(--e-global-color-c172edd);
                     border-color: var(--e-global-color-c172edd);
                     color: #fff;
@@ -3443,7 +3443,7 @@ class Silvertell_Woocommerce_Customisation
                     // Product Range sub-tabs (New Preferred Range / Extended Range).
                     $('.dd-range-tabs').each(function() {
                         var $wrap = $(this);
-                        var $nav = $wrap.find('.dd-range-nav-item');
+                        var $nav = $wrap.find('.dd-range-nav-item.dd-range-nav-item.dd-range-nav-item');
                         var $panels = $wrap.find('.dd-range-panel');
 
                         $nav.on('click', function() {

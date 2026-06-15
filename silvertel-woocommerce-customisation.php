@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.40.0
+ * Version: 2.41.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2853,13 +2853,19 @@ class Silvertell_Woocommerce_Customisation
                 position: fixed;
                 inset: 0;
                 z-index: 99999;
-                display: none;
+                display: flex;
                 align-items: center;
                 justify-content: center;
+                opacity: 0;
+                visibility: hidden;
+                pointer-events: none;
+                transition: opacity 0.22s ease, visibility 0.22s ease;
             }
 
             .dd-buy-modal.is-open {
-                display: flex;
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
             }
 
             .dd-buy-modal-overlay {
@@ -2878,6 +2884,12 @@ class Silvertell_Woocommerce_Customisation
                 overflow: auto;
                 padding: 26px 26px 20px;
                 box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+                transform: translateY(14px) scale(0.97);
+                transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.25, 1);
+            }
+
+            .dd-buy-modal.is-open .dd-buy-modal-box {
+                transform: translateY(0) scale(1);
             }
 
             .dd-buy-modal-title {
@@ -2930,7 +2942,7 @@ class Silvertell_Woocommerce_Customisation
                 margin: 0 0 6px;
             }
 
-            .dd-buy-acc-head {
+            .dd-buy-acc-head.dd-buy-acc-head.dd-buy-acc-head.dd-buy-acc-head {
                 width: 100%;
                 display: flex;
                 align-items: center;
@@ -2942,9 +2954,11 @@ class Silvertell_Woocommerce_Customisation
                 border-radius: 6px;
                 cursor: pointer;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: bold;
                 color: #222;
                 text-align: left;
+                letter-spacing: 1px;
+                text-transform: uppercase;
             }
 
             .dd-buy-acc-head:hover {
@@ -2995,6 +3009,7 @@ class Silvertell_Woocommerce_Customisation
                 border-radius: 0;
                 border-bottom: 1px solid #eee;
                 box-shadow: none;
+                font-size: 14px;
             }
 
             .dd-buy-modal-list .dd-buy-acc-body li:last-child a {
@@ -3015,6 +3030,7 @@ class Silvertell_Woocommerce_Customisation
                 text-decoration: none;
                 word-break: break-word;
                 transition: border-color 0.15s, background 0.15s;
+                font-size: 14px;
             }
 
             .dd-buy-modal-list li a:hover {
@@ -3024,6 +3040,19 @@ class Silvertell_Woocommerce_Customisation
 
             body.dd-buy-modal-open {
                 overflow: hidden;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+
+                .dd-buy-modal,
+                .dd-buy-modal-box,
+                .dd-buy-acc-icon {
+                    transition: none !important;
+                }
+
+                .dd-buy-modal-box {
+                    transform: none !important;
+                }
             }
 
             .dd-eb-card {
@@ -3252,16 +3281,24 @@ class Silvertell_Woocommerce_Customisation
                     });
 
                     // Sub-range group accordion inside the popup (delegated, as the content
-                    // is injected at open time). Single-open: opening one collapses the rest.
+                    // is injected at open time). Single-open: opening one slides the rest
+                    // shut. slideUp/Down give the height animation; the class toggle drives
+                    // the chevron + header styling.
                     $modal.on('click', '.dd-buy-acc-head', function() {
                         var $item = $(this).closest('.dd-buy-acc-item');
                         var $acc = $(this).closest('.dd-buy-acc');
                         var wasOpen = $item.hasClass('is-open');
-                        $acc.find('.dd-buy-acc-item').removeClass('is-open')
-                            .find('.dd-buy-acc-head').attr('aria-expanded', 'false');
+
+                        $acc.find('.dd-buy-acc-item.is-open').each(function() {
+                            $(this).removeClass('is-open')
+                                .children('.dd-buy-acc-head').attr('aria-expanded', 'false');
+                            $(this).children('.dd-buy-acc-body').stop(true, true).slideUp(200);
+                        });
+
                         if (!wasOpen) {
                             $item.addClass('is-open');
                             $(this).attr('aria-expanded', 'true');
+                            $item.children('.dd-buy-acc-body').stop(true, true).slideDown(220);
                         }
                     });
                 });

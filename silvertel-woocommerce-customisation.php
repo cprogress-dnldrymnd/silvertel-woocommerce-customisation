@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.3
+ * Version: 2.43.4
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -61,6 +61,10 @@ class Silvertell_Woocommerce_Customisation
         // Frontend Single Product Tabs (rendered by the native WC tabs / Elementor Product Data Tabs widget)
         add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs'], 98);
         add_action('wp_footer', [$this, 'inject_frontend_assets']);
+
+        // Shop/archive grid: the theme strips the native loop button, so add a
+        // "View Product" link back onto each card (standard WC loop-button hook).
+        add_action('woocommerce_after_shop_loop_item', [$this, 'add_shop_loop_view_button'], 10);
 
         // Elementor: register the standalone "Product Features" and "Buy Samples" widgets.
         add_action('elementor/widgets/register', [$this, 'register_elementor_widgets']);
@@ -2585,6 +2589,45 @@ class Silvertell_Woocommerce_Customisation
             $items .= '<li><a href="' . esc_url($link['url']) . '" target="_blank" rel="noopener nofollow">' . esc_html($label) . '</a></li>';
         }
         return '<ul>' . $items . '</ul>';
+    }
+
+    /**
+     * Re-add a "View Product" button to each card in the shop/archive grid.
+     *
+     * The theme removes WooCommerce's native loop button, so this hooks the same
+     * `woocommerce_after_shop_loop_item` slot and outputs a permalink button. It
+     * carries its own `dd-view-product` class (styled below) as well as the core
+     * `button` class, and the inline CSS is printed once on the first render so it
+     * works regardless of which template/Elementor widget builds the grid.
+     */
+    public function add_shop_loop_view_button()
+    {
+        global $product;
+        if (! $product) return;
+
+        static $printed_css = false;
+        if (! $printed_css) {
+            $printed_css = true;
+        ?>
+            <style>
+                .dd-view-product {
+                    display: inline-block !important;
+                    margin-top: 8px;
+                    padding: 10px 18px;
+                    line-height: 1.2;
+                    text-decoration: none;
+                    text-align: center;
+                    cursor: pointer;
+                }
+            </style>
+        <?php
+        }
+
+        printf(
+            '<a href="%s" class="button dd-view-product">%s</a>',
+            esc_url(get_permalink($product->get_id())),
+            esc_html__('View Product', 'silvertell-wc-customisation')
+        );
     }
 
     public function inject_frontend_assets()

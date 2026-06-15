@@ -137,14 +137,22 @@ The major subsystems:
   groups render as `.dd-range-tabs` sub-tabs — the same markup/JS/CSS switcher used by
   the Product Range tab.
 
+- **Shop/archive grid** (`add_shop_loop_view_button`, on
+  `woocommerce_after_shop_loop_item`): the theme strips WooCommerce's native loop button,
+  so this re-adds a "View Product" permalink button (`.dd-view-product`) to each card,
+  printing its inline CSS once on first render.
+
 - **Responsive layout** (`inject_frontend_assets`, below 768px): the native WooCommerce
-  single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open
-  accordion — the tab switcher moves each panel to sit directly under its header tab on
-  `matchMedia` change, and reverts the DOM order back to the normal tab layout above
-  768px. `.dd-range-table` and `.dd-eb-table` rows stack into cards, with each
-  `<td data-label="...">` (set in `render_range_table` and `render_eb_board_table`)
-  becoming the row's visible label via CSS `::before`. The `.dd-range-nav` sub-tab pills
-  (Product Range / Evaluation Boards sub-tabs) stack into full-width buttons.
+  single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open,
+  closeable accordion — the tab switcher moves each panel to sit directly under its
+  header tab on `matchMedia` change, clicking the open tab again collapses it (with
+  `stopPropagation` to stop WooCommerce's own tab handler reopening it), and the DOM
+  order reverts back to the normal tab layout above 768px. `.dd-range-table` and
+  `.dd-eb-table` rows stack into cards, with each `<td data-label="...">` (set in
+  `render_range_table` and `render_eb_board_table`) becoming the row's visible label via
+  CSS `::before`. The `.dd-range-nav` sub-tabs (Product Range / Evaluation Boards
+  sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
+  font size and padding.
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

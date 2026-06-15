@@ -2193,7 +2193,7 @@ class Silvertell_Woocommerce_Customisation
                 position: relative;
                 margin-bottom: 8px;
                 display: flex;
-                align-items: center;
+                gap: 10px;
             }
 
             .dd-feature-list li::before {

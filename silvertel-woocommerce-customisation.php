@@ -2708,6 +2708,16 @@ class Silvertell_Woocommerce_Customisation
                 padding-top: 5px;
             }
 
+             .shop-products-wrapper .product-cart-button {
+                display: none;
+            }
+
+            .shop-products-wrapper .product-buttons {
+                display: none;
+
+            }
+
+
             /* ---- Single-product tabs become an accordion below 768px ---- */
             @media (max-width: 768px) {
 
@@ -3225,15 +3235,7 @@ class Silvertell_Woocommerce_Customisation
                 overflow: hidden;
             }
 
-            .shop-products-wrapper .product-cart-button {
-                display: none;
-            }
-
-            .shop-products-wrapper .product-buttons {
-                display: none;
-
-            }
-
+           
             @media (prefers-reduced-motion: reduce) {
 
                 .dd-buy-modal,

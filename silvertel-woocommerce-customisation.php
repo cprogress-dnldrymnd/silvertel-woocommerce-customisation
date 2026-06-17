@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.6
+ * Version: 2.43.7
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2617,6 +2617,17 @@ class Silvertell_Woocommerce_Customisation
     {
         global $product;
         if (! $product) return;
+
+        $features = get_post_meta($product->get_id(), '_features', true);
+        if (! empty($features) && is_array($features)) {
+            $items = '';
+            foreach ($features as $feature) {
+                if (trim($feature) !== '') $items .= '<li>' . esc_html($feature) . '</li>';
+            }
+            if ($items !== '') {
+                echo '<ul class="dd-loop-features">' . $items . '</ul>';
+            }
+        }
 
         printf(
             '<div class="dd-view-product-holder"><a href="%s" class="button dd-view-product">%s</a></div>',

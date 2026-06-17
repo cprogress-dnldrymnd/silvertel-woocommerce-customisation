@@ -265,7 +265,7 @@ class Silvertell_Woocommerce_Customisation
                 <p>Do not close this window until the import is complete.</p>
 
                 <div style="background: #f0f0f1; border-radius: 20px; height: 24px; overflow: hidden; margin: 20px 0; width: 100%; position: relative;">
-                    <div id="dd-eb-progress-fill" style="background: #2271b1; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                    <div id="dd-eb-progress-fill" style="background: var( --e-global-color-c172edd ); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
                     <span id="dd-eb-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 24px; font-size: 12px; color: #fff; font-weight: bold; mix-blend-mode: difference;">0%</span>
                 </div>
 
@@ -545,7 +545,7 @@ class Silvertell_Woocommerce_Customisation
         echo '<div class="dd-file-wrap" style="display:flex; gap:10px; align-items:center; width:100%; max-width:600px;">';
         echo '<input type="hidden" name="pdf_file" class="dd-file-input" value="' . esc_attr($file_val) . '" />';
         echo '<button type="button" class="button button-primary dd-upload-file">Select File</button>';
-        echo '<span class="dd-file-display" style="font-weight:500; color:#2271b1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">' . esc_html($filename_display) . '</span>';
+        echo '<span class="dd-file-display" style="font-weight:500; color:var( --e-global-color-c172edd ); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">' . esc_html($filename_display) . '</span>';
         echo '</div>';
         if ($display_file) echo '<p class="description" style="margin-top:10px;"><a href="' . esc_url($display_file) . '" target="_blank">Preview Current File</a></p>';
         echo '</div></div>';
@@ -2900,14 +2900,14 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-doc-btn:hover {
-                background: #2271b1;
-                border-color: #2271b1;
+                background: var( --e-global-color-c172edd );
+                border-color: var( --e-global-color-c172edd );
                 color: #fff;
             }
 
             .dd-doc-icon {
                 flex: 0 0 auto;
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
                 transition: color 0.15s ease;
             }
 
@@ -3370,15 +3370,15 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item:hover {
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
                 background: #f6f7f7;
             }
 
             .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item.active {
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
                 background: #fff;
                 border-color: #e0e0e0;
-                border-bottom-color: #2271b1;
+                border-bottom-color: var( --e-global-color-c172edd );
             }
 
             /* ---- Range sub-tab nav: same underlined tabs as desktop, just tighter ---- */
@@ -3647,7 +3647,7 @@ class Silvertell_Woocommerce_Customisation
         echo '<span class="dd-file-wrap" style="display:flex; align-items:center; gap:10px; width:100%;">';
         echo '<input type="hidden" name="' . esc_attr($html_name) . '" id="' . esc_attr($html_name) . '" class="dd-file-input" value="' . esc_attr($raw_val) . '" />';
         echo '<button type="button" class="button button-primary dd-upload-file">Select File</button>';
-        echo '<span class="dd-file-display" style="font-weight:500; color:#2271b1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">' . esc_html($filename_display) . '</span>';
+        echo '<span class="dd-file-display" style="font-weight:500; color:var( --e-global-color-c172edd ); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">' . esc_html($filename_display) . '</span>';
         echo '</span>';
         if ($description || $display_file) {
             echo '<span class="description" style="display:block; margin-top:8px;">';
@@ -4068,7 +4068,7 @@ class Silvertell_Woocommerce_Customisation
             .dd-repeater-header-title {
                 margin-bottom: 15px;
                 font-size: 14px;
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
             }
 
             .dd-repeater-container {
@@ -4122,7 +4122,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-repeater-actions span:hover {
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
             }
 
             .dd-repeater-actions .dd-delete-row:hover {
@@ -4178,7 +4178,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-file-display {
                 font-weight: 500;
-                color: #2271b1;
+                color: var( --e-global-color-c172edd );
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;

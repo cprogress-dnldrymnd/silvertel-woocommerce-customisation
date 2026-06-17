@@ -140,9 +140,10 @@ The major subsystems:
 
 - **Shop/archive grid** (`add_shop_loop_view_button`, on
   `woocommerce_after_shop_loop_item`): the theme strips WooCommerce's native loop button,
-  so this re-adds a "View Product" permalink button (`.dd-view-product`) to each card,
-  printing its inline CSS once on first render. If the product has a non-empty `_features`
-  array, a `<ul class="dd-loop-features">` is output above the button.
+  so this re-adds a "View Product" permalink anchor (`.dd-view-product`) wrapped in a
+  `.dd-view-product-holder` div. If the product has a non-empty `_features` array, a
+  `<ul class="dd-loop-features">` is output above it. CSS for both elements is in
+  `inject_frontend_assets`.
 
 - **Responsive layout** (`inject_frontend_assets`, fires on all WooCommerce pages via `is_woocommerce()`, responsive behaviour below 768px): the native WooCommerce
   single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open,

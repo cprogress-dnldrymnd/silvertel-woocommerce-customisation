@@ -2754,6 +2754,11 @@ class Silvertell_Woocommerce_Customisation
                 font-weight: 500;
                 height: auto !important;
                 border-radius: 50px !important;
+                transition: 400ms;
+            }
+
+            .dd-view-product-holder .dd-view-product:hover {
+                opacity: 0.8;
             }
 
             /* ---- Single-product tabs become an accordion below 768px ---- */

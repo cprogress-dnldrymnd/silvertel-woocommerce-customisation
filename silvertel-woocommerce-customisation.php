@@ -2708,12 +2708,12 @@ class Silvertell_Woocommerce_Customisation
                 padding-top: 5px;
             }
 
-             .shop-products-wrapper .product-cart-button {
-                display: none;
+            .shop-products-wrapper .product-cart-button {
+                display: none !important;
             }
 
             .shop-products-wrapper .product-buttons {
-                display: none;
+                display: none !important;
 
             }
 
@@ -3235,7 +3235,7 @@ class Silvertell_Woocommerce_Customisation
                 overflow: hidden;
             }
 
-           
+
             @media (prefers-reduced-motion: reduce) {
 
                 .dd-buy-modal,

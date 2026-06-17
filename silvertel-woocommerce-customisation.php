@@ -2618,24 +2618,6 @@ class Silvertell_Woocommerce_Customisation
         global $product;
         if (! $product) return;
 
-        static $printed_css = false;
-        if (! $printed_css) {
-            $printed_css = true;
-        ?>
-            <style>
-                .dd-view-product {
-                    display: inline-block !important;
-                    margin-top: 8px;
-                    padding: 10px 18px;
-                    line-height: 1.2;
-                    text-decoration: none;
-                    text-align: center;
-                    cursor: pointer;
-                }
-            </style>
-        <?php
-        }
-
         printf(
             '<div class="dd-view-product-holder"><a href="%s" class="button dd-view-product">%s</a></div>',
             esc_url(get_permalink($product->get_id())),
@@ -2732,6 +2714,31 @@ class Silvertell_Woocommerce_Customisation
 
             .products .product-content-footer {
                 display: none;
+            }
+
+            .dd-view-product-holder {
+                text-align: center;
+            }
+
+            .dd-view-product {
+                display: inline-block !important;
+                line-height: 1.2;
+                text-decoration: none;
+                text-align: center;
+                cursor: pointer;
+                background-color: #0089FF;
+                color: #fff;
+                margin: 0;
+                margin-top: 0px;
+                margin-right: 0px;
+                margin-bottom: 0px;
+                margin-left: 0px;
+                padding: 12px;
+                width: 100%;
+                font-size: 16px;
+                font-weight: 500;
+                height: auto;
+                border-radius: 50px;
             }
 
             /* ---- Single-product tabs become an accordion below 768px ---- */

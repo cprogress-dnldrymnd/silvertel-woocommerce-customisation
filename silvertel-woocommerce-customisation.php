@@ -770,29 +770,23 @@ class Silvertell_Woocommerce_Customisation
     {
         global $post;
 
-        // Tab 1: Buy Samples — a per-provider repeater of labelled purchase links.
+        // Tab 1: Buy Samples — one URL per provider.
         echo '<div id="silvertell_buy_samples_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
         $providers = $this->get_sample_providers();
         if (! empty($providers)) {
             echo '<div class="options_group" style="padding:12px 12px 4px;">';
-            echo '<p class="description" style="margin:0 0 14px;">' . esc_html__('Add one or more purchase links per distributor. On the product page a distributor with a single link opens it directly; with multiple links the logo opens a popup list.', 'silvertell-wc-customisation') . '</p>';
             foreach ($providers as $provider) {
                 $key   = $provider['meta_key'];
                 $links = $this->get_provider_links($post->ID, $provider);
-                echo '<div class="dd-buy-provider" style="margin-bottom:22px;">';
-                echo '<div class="dd-repeater-header-title"><strong>' . esc_html($provider['name']) . '</strong></div>';
-                echo '<div class="dd-repeater-container" data-type="buy_links">';
-                foreach ($links as $link) {
-                    $this->render_buy_link_row($key, $link['label'], $link['url'], false);
-                }
-                $this->render_buy_link_row($key, '', '', true);
-                echo '</div>';
-                echo '<div class="dd-repeater-footer"><button type="button" class="button button-secondary dd-add-row">' . esc_html__('Add Link', 'silvertell-wc-customisation') . '</button></div>';
-                echo '</div>';
+                $val   = ! empty($links) ? $links[0]['url'] : '';
+                echo '<p class="form-field">';
+                echo '<label>' . esc_html($provider['name']) . '</label>';
+                echo '<input type="url" name="buy_samples[' . esc_attr($key) . ']" class="short" value="' . esc_attr($val) . '" />';
+                echo '</p>';
             }
             echo '</div>';
         } else {
-            echo '<p style="padding:15px;">No sample providers configured. Add them in WooCommerce > Silvertell Settings.</p>';
+            echo '<p style="padding:15px;">No sample providers configured. Add them in WooCommerce &gt; Silvertell Settings.</p>';
         }
         echo '</div>';
 
@@ -3732,30 +3726,16 @@ class Silvertell_Woocommerce_Customisation
     {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
 
-        // 1. Save Dynamic Buy Samples — a per-provider list of labelled purchase links.
-        //    Only touched when the editor actually submitted the repeater (buy_links),
-        //    so it never clobbers single-URL values set via other UIs (eval boards / child modal).
-        if (isset($_POST['buy_links']) && is_array($_POST['buy_links'])) {
-            $providers = $this->get_sample_providers();
-            $buy_links = wp_unslash($_POST['buy_links']);
-            foreach ($providers as $provider) {
-                $key  = $provider['meta_key'];
-                $rows = [];
-                if (isset($buy_links[$key]) && is_array($buy_links[$key])) {
-                    $labels = isset($buy_links[$key]['label']) ? (array) $buy_links[$key]['label'] : [];
-                    $urls   = isset($buy_links[$key]['url'])   ? (array) $buy_links[$key]['url']   : [];
-                    $count  = max(count($labels), count($urls));
-                    for ($i = 0; $i < $count; $i++) {
-                        $url = isset($urls[$i]) ? esc_url_raw(trim($urls[$i])) : '';
-                        if ($url === '') continue;
-                        $rows[] = [
-                            'label' => isset($labels[$i]) ? sanitize_text_field($labels[$i]) : '',
-                            'url'   => $url,
-                        ];
-                    }
-                }
-                if (! empty($rows)) {
-                    update_post_meta($post_id, $key, $rows);
+        // 1. Save Buy Samples — one URL per provider (matches child modal format).
+        if (isset($_POST['buy_samples']) && is_array($_POST['buy_samples'])) {
+            $providers  = $this->get_sample_providers();
+            $valid_keys = wp_list_pluck($providers, 'meta_key');
+            $buy_samples = wp_unslash($_POST['buy_samples']);
+            foreach ($buy_samples as $key => $url) {
+                if (! in_array($key, $valid_keys, true)) continue;
+                $url = esc_url_raw(trim($url));
+                if ($url !== '') {
+                    update_post_meta($post_id, $key, sanitize_url($url));
                 } else {
                     delete_post_meta($post_id, $key);
                 }

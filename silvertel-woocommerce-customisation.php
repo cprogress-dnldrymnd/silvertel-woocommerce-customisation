@@ -1687,11 +1687,6 @@ class Silvertell_Woocommerce_Customisation
                 margin-left: auto;
             }
 
-            /* Select2 Overrides */
-            .select2-container {
-                z-index: 100005 !important;
-            }
-
             .select2-container--default .select2-selection--multiple {
                 border-color: #dcdcde;
                 border-radius: 4px;

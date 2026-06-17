@@ -2703,6 +2703,8 @@ class Silvertell_Woocommerce_Customisation
                 background-color: #F4F4F4;
                 border-radius: 15px;
                 padding: 2.375rem;
+                display: flex;
+                flex-direction: column;
             }
 
             .product .product-wrapper.product-background .product-content-wrapper {
@@ -2721,8 +2723,16 @@ class Silvertell_Woocommerce_Customisation
                 display: none;
             }
 
+            .products .product-thumbnail {
+                aspect-ratio: 1 / 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
             .dd-view-product-holder {
                 text-align: center;
+                margin-top: auto;
             }
 
             .dd-view-product-holder .dd-view-product {

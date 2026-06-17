@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.4
+ * Version: 2.43.5
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -79,6 +79,10 @@ class Silvertell_Woocommerce_Customisation
         // counts (All / Published / Trash) shown above the list.
         add_action('pre_get_posts', [$this, 'hide_child_products_from_list']);
         add_filter('wp_count_posts', [$this, 'exclude_children_from_count'], 10, 2);
+
+        // Frontend shop/archive: exclude child products from all WooCommerce product
+        // listings — they surface only inside their parent's Product Range tab.
+        add_action('woocommerce_product_query', [$this, 'hide_child_products_from_shop']);
 
         // Child Products manager on the product edit screen (tree list + add/delete + a
         // popup editor for Title / Content / Categories / SKU / Attributes / Buy Samples).
@@ -973,6 +977,15 @@ class Silvertell_Woocommerce_Customisation
     {
         if (! $this->is_plain_product_list_query($query)) return;
 
+        $query->set('post_parent', 0);
+    }
+
+    /**
+     * Exclude child products from frontend shop/archive/search listings. Called via
+     * the `woocommerce_product_query` hook which fires only for WC's main product query.
+     */
+    public function hide_child_products_from_shop($query)
+    {
         $query->set('post_parent', 0);
     }
 

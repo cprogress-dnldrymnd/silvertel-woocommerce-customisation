@@ -2772,6 +2772,13 @@ class Silvertell_Woocommerce_Customisation
                 opacity: 0.8;
             }
 
+            .dd-loop-features {
+                font-size: 13px;
+                color: #71717A;
+                letter-spacing: -0.75px;
+                padding-left: 1rem;
+            }
+
             /* ---- Single-product tabs become an accordion below 768px ---- */
             @media (max-width: 768px) {
 

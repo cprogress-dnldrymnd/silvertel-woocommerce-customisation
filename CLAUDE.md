@@ -143,7 +143,7 @@ The major subsystems:
   so this re-adds a "View Product" permalink button (`.dd-view-product`) to each card,
   printing its inline CSS once on first render.
 
-- **Responsive layout** (`inject_frontend_assets`, below 768px): the native WooCommerce
+- **Responsive layout** (`inject_frontend_assets`, fires on all WooCommerce pages via `is_woocommerce()`, responsive behaviour below 768px): the native WooCommerce
   single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open,
   closeable accordion — the tab switcher moves each panel to sit directly under its
   header tab on `matchMedia` change, clicking the open tab again collapses it (with

@@ -2718,6 +2718,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-view-product-holder {
                 text-align: center;
+                padding-inline: 2.375rem;
             }
 
             .dd-view-product {

@@ -1897,7 +1897,7 @@ class Silvertell_Woocommerce_Customisation
                 });
             })(jQuery);
         </script>
-    <?php
+        <?php
     }
 
     /**
@@ -2646,7 +2646,7 @@ class Silvertell_Woocommerce_Customisation
     public function inject_frontend_assets()
     {
         if (! function_exists('is_product') || ! is_product()) return;
-    ?>
+        ?>
         <style>
             /* ---- Single-product tab navigation (horizontal, underlined active) ---- */
             .woocommerce-tabs ul.tabs.wc-tabs {
@@ -2913,8 +2913,8 @@ class Silvertell_Woocommerce_Customisation
                     border-bottom: 1px solid #f0f0f0;
                 }
 
-                .dd-range-table tr > td:last-child,
-                .dd-eb-table tr > td:last-child {
+                .dd-range-table tr>td:last-child,
+                .dd-eb-table tr>td:last-child {
                     border-bottom: 0;
                 }
 
@@ -3183,9 +3183,11 @@ class Silvertell_Woocommerce_Customisation
             .dd-buy-modal-list .dd-buy-acc-body li {
                 margin: 0;
             }
+
             .dd-buy-modal-list .dd-buy-acc-body li:not(:last-child) {
                 border-bottom: 1px solid #eee;
             }
+
             .dd-buy-modal-list .dd-buy-acc-body li a {
                 padding: 11px;
                 border: 0;
@@ -3221,6 +3223,15 @@ class Silvertell_Woocommerce_Customisation
 
             body.dd-buy-modal-open {
                 overflow: hidden;
+            }
+
+            .shop-products-wrapper .product-cart-button {
+                display: none;
+            }
+
+            .shop-products-wrapper .product-buttons {
+                display: none;
+
             }
 
             @media (prefers-reduced-motion: reduce) {

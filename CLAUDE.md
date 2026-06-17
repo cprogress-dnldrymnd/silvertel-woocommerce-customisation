@@ -82,8 +82,9 @@ The major subsystems:
   via `wp_set_object_terms`; deleting (`delete_product_branch`) is **permanent and
   recursive** (`wp_delete_post($id, true)`, no trash). Children are hidden from the admin
   Products list and status counts (`hide_child_products_from_list`,
-  `exclude_children_from_count`) and 301-redirect to their top-level ancestor on the
-  frontend (`redirect_child_product_pages`). `register_frontend_product_tabs` then adds a
+  `exclude_children_from_count`), excluded from frontend shop/archive/search queries
+  (`hide_child_products_from_shop`, on `woocommerce_product_query`), and 301-redirect to
+  their top-level ancestor on the frontend (`redirect_child_product_pages`). `register_frontend_product_tabs` then adds a
   "Product Range" tab (`build_product_range`) on the ancestor's page: L2 children with
   their own children render as sub-range sections (heading/description/note + variant
   table, grouped into sub-tabs by their "Product Range > X" category via

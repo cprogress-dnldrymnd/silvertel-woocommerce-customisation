@@ -2721,7 +2721,7 @@ class Silvertell_Woocommerce_Customisation
                 padding-inline: 2.375rem;
             }
 
-            .dd-view-product {
+            .dd-view-product-holder .dd-view-product {
                 display: inline-block !important;
                 line-height: 1.2;
                 text-decoration: none;

@@ -1897,7 +1897,7 @@ class Silvertell_Woocommerce_Customisation
                 });
             })(jQuery);
         </script>
-        <?php
+    <?php
     }
 
     /**
@@ -2628,7 +2628,7 @@ class Silvertell_Woocommerce_Customisation
     public function inject_frontend_assets()
     {
         if (! function_exists('is_woocommerce') || ! is_woocommerce()) return;
-        ?>
+    ?>
         <style>
             /* ---- Single-product tab navigation (horizontal, underlined active) ---- */
             .woocommerce-tabs ul.tabs.wc-tabs {
@@ -2719,6 +2719,7 @@ class Silvertell_Woocommerce_Customisation
             .dd-view-product-holder {
                 text-align: center;
                 padding-inline: 2.375rem;
+                padding-bottom: 2.375rem;
             }
 
             .dd-view-product-holder .dd-view-product {
@@ -2738,8 +2739,8 @@ class Silvertell_Woocommerce_Customisation
                 width: 100%;
                 font-size: 16px;
                 font-weight: 500;
-                height: auto;
-                border-radius: 50px;
+                height: auto !important;
+                border-radius: 50px !important;
             }
 
             /* ---- Single-product tabs become an accordion below 768px ---- */

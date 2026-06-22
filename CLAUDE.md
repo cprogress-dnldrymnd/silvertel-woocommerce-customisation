@@ -160,7 +160,12 @@ The major subsystems:
   `render_range_table` and `render_eb_board_table`) becoming the row's visible label via
   CSS `::before`. The `.dd-range-nav` sub-tabs (Product Range / Evaluation Boards
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
-  font size and padding.
+  font size and padding. On shop/archive pages a **mobile sidebar filter modal** is also
+  injected: the script detects a sidebar containing WooCommerce filter widgets (layered
+  nav, price filter, product categories) and on screens ≤ 767px converts it into a fixed
+  slide-in panel (`.dd-shop-sidebar`) with a dark overlay (`.dd-sidebar-overlay`), a
+  close button, and a `.dd-filter-btn` "FILTERS" button inserted before the products
+  area. No-ops silently if no filter sidebar is found (e.g. single product pages).
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

@@ -128,9 +128,13 @@ The major subsystems:
   information" last, and conditionally adds "Documents" (from `_linked_documents`) and
   "Evaluation Boards" (from `_linked_eval_boards`) tabs. Features are **not** a tab —
   they render via the separate "Product Features" Elementor widget; the distributor "Buy
-  Samples" block is likewise its own Elementor widget (both registered in
-  `register_elementor_widgets`, defined by top-level `silvertell_define_*_elementor_widget`
-  functions). The Evaluation Boards tab
+  Samples" block is likewise its own Elementor widget; and there is a **Document Link**
+  Elementor widget (`silvertell_define_document_link_elementor_widget`) that lets the
+  editor pick any `product-support` post and render a single download-button link to its
+  `pdf_file` (supports both attachment-ID and raw URL values for that meta, shows
+  placeholder text in the editor if no document or file is set). All three are registered
+  in `register_elementor_widgets`, defined by top-level
+  `silvertell_define_*_elementor_widget` functions. The Evaluation Boards tab
   (`render_evaluation_boards_tab`) renders a card per linked board
   (`render_eval_board_card`), plus a variant table for each board's orderable children
   grouped by `evaluation-board-category` (`render_eval_board_children_table` →

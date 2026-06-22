@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.8
+ * Version: 2.43.10
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1936,12 +1936,16 @@ class Silvertell_Woocommerce_Customisation
         // Elementor's base class is guaranteed to exist.
         silvertell_define_features_elementor_widget();
         silvertell_define_buy_samples_elementor_widget();
+        silvertell_define_document_link_elementor_widget();
 
         if (class_exists('Silvertell_Features_Elementor_Widget')) {
             $widgets_manager->register(new Silvertell_Features_Elementor_Widget());
         }
         if (class_exists('Silvertell_Buy_Samples_Elementor_Widget')) {
             $widgets_manager->register(new Silvertell_Buy_Samples_Elementor_Widget());
+        }
+        if (class_exists('Silvertell_Document_Link_Elementor_Widget')) {
+            $widgets_manager->register(new Silvertell_Document_Link_Elementor_Widget());
         }
     }
 
@@ -4560,6 +4564,105 @@ function silvertell_define_buy_samples_elementor_widget()
             }
             echo '<div class="dd-buy-wrap">' . $buttons . '</div>'; // buttons already escaped
             echo '</div>';
+        }
+    }
+}
+
+/**
+ * Declare the "Document Link" Elementor widget class.
+ *
+ * Lets the editor pick any product-support post and set custom button text;
+ * renders a single download-button link to that post's pdf_file.
+ */
+function silvertell_define_document_link_elementor_widget()
+{
+    if (class_exists('Silvertell_Document_Link_Elementor_Widget')) return;
+    if (! class_exists('\Elementor\Widget_Base')) return;
+
+    class Silvertell_Document_Link_Elementor_Widget extends \Elementor\Widget_Base
+    {
+        public function get_name()
+        {
+            return 'silvertell_document_link';
+        }
+
+        public function get_title()
+        {
+            return __('Document Link', 'silvertell-wc-customisation');
+        }
+
+        public function get_icon()
+        {
+            return 'eicon-download-button';
+        }
+
+        public function get_categories()
+        {
+            return ['woocommerce-elements-single', 'woocommerce-elements', 'general'];
+        }
+
+        public function get_keywords()
+        {
+            return ['document', 'pdf', 'download', 'product', 'support', 'silvertell'];
+        }
+
+        protected function register_controls()
+        {
+            $this->start_controls_section('content_section', [
+                'label' => __('Content', 'silvertell-wc-customisation'),
+                'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
+            ]);
+
+            $this->add_control('button_text', [
+                'label'       => __('Button Text', 'silvertell-wc-customisation'),
+                'type'        => \Elementor\Controls_Manager::TEXT,
+                'default'     => __('Download', 'silvertell-wc-customisation'),
+                'placeholder' => __('Leave blank to use the document title', 'silvertell-wc-customisation'),
+                'label_block' => true,
+            ]);
+
+            $this->add_control('loop_notice', [
+                'type'            => \Elementor\Controls_Manager::RAW_HTML,
+                'raw'             => __('Place this widget inside a loop over product-support posts. It reads the current post in the loop automatically.', 'silvertell-wc-customisation'),
+                'content_classes' => 'elementor-descriptor',
+            ]);
+
+            $this->end_controls_section();
+        }
+
+        protected function render()
+        {
+            $settings    = $this->get_settings_for_display();
+            $document_id = get_the_ID();
+            $button_text = trim($settings['button_text'] ?? '');
+            $is_editor   = \Elementor\Plugin::$instance->editor->is_edit_mode();
+
+            if (! $document_id) {
+                if ($is_editor) {
+                    echo '<p>' . esc_html__('No post in context — place this widget inside a loop.', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            $file_val = get_post_meta($document_id, 'pdf_file', true);
+            $file_url = is_numeric($file_val) ? wp_get_attachment_url((int) $file_val) : $file_val;
+
+            if (empty($file_url)) {
+                if ($is_editor) {
+                    echo '<p>' . esc_html__('This post has no file attached (pdf_file meta is empty).', 'silvertell-wc-customisation') . '</p>';
+                }
+                return;
+            }
+
+            if ($button_text === '') {
+                $button_text = get_the_title($document_id) ?: __('Download', 'silvertell-wc-customisation');
+            }
+
+            $icon = '<svg class="dd-doc-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
+            echo '<a class="dd-doc-btn" href="' . esc_url($file_url) . '" target="_blank" rel="noopener" download>'
+                . $icon
+                . '<span class="dd-doc-btn-label">' . esc_html($button_text) . '</span></a>';
         }
     }
 }

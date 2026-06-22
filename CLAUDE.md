@@ -102,12 +102,12 @@ The major subsystems:
   name/meta-key/logo; defaults to Farnell/Mouser/Digikey). `render_provider_buttons`
   (static; shared by the Buy Samples Elementor widget, eval-board card, and Product Range
   table) renders a logo-only bordered pill (`.dd-buy-btn--logo`) when a provider has a
-  logo, otherwise falls back to the provider name with a cart icon. Each provider can hold
-  **multiple labelled links** per product (a repeater on the product's Buy Samples tab,
-  stored as an array of `['label','url']` under the provider meta key — `get_provider_links`
-  normalises both that array and the legacy single-URL string written by the eval-board
-  meta box / child modal). A provider with one link is a direct anchor; with several, the
-  pill becomes a `<button class="dd-buy-btn--multi">` that opens the `.dd-buy-modal` popup
+  logo, otherwise falls back to the provider name with a cart icon. The product editor's
+  **Buy Samples tab stores a single URL per provider** (plain URL string saved via
+  `sanitize_url`); `get_provider_links` normalises both that format and the legacy
+  `['label','url']` array, preserving backwards compatibility with older data. A provider
+  with one link is a direct anchor; with several legacy links, the pill becomes a
+  `<button class="dd-buy-btn--multi">` that opens the `.dd-buy-modal` popup
   (markup/CSS/JS injected by `inject_frontend_assets`). The **Buy Samples Elementor widget**
   uses `render_aggregated_provider_buttons` instead: it walks the product **and all its
   variant descendants** (`collect_range_link_sources`, which mirrors `build_product_range`'s
@@ -146,7 +146,8 @@ The major subsystems:
   `woocommerce_after_shop_loop_item`): the theme strips WooCommerce's native loop button,
   so this re-adds a "View Product" permalink anchor (`.dd-view-product`) wrapped in a
   `.dd-view-product-holder` div. If the product has a non-empty `_features` array, a
-  `<ul class="dd-loop-features">` is output above it. CSS for both elements is in
+  `<ul class="dd-loop-features">` is output above it; each `<li>` gets a CSS checkmark
+  (`::before { content: "\2713" }`) in the brand colour. CSS for both elements is in
   `inject_frontend_assets`.
 
 - **Responsive layout** (`inject_frontend_assets`, fires on all WooCommerce pages via `is_woocommerce()`, responsive behaviour below 768px): the native WooCommerce

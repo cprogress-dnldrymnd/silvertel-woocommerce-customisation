@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.10
+ * Version: 2.43.11
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3475,6 +3475,97 @@ class Silvertell_Woocommerce_Customisation
                 padding-left: 0;
                 padding-right: 0;
             }
+
+            /* ---- Mobile shop sidebar: FILTERS button + slide-in modal ---- */
+            .dd-filter-btn {
+                display: none;
+            }
+
+            .dd-sidebar-overlay {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 99990;
+            }
+
+            .dd-sidebar-overlay.is-active {
+                display: block;
+            }
+
+            .dd-sidebar-close-btn {
+                display: none;
+            }
+
+            @media (max-width: 767px) {
+
+                .dd-filter-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px 22px;
+                    background: var(--e-global-color-c172edd, #0089FF);
+                    color: #fff;
+                    border: none;
+                    border-radius: 50px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    letter-spacing: 0.05em;
+                    text-transform: uppercase;
+                    margin-bottom: 16px;
+                    transition: opacity 0.2s ease;
+                }
+
+                .dd-filter-btn:hover {
+                    opacity: 0.85;
+                }
+
+                .dd-shop-sidebar {
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 85% !important;
+                    max-width: 320px !important;
+                    height: 100% !important;
+                    background: #fff !important;
+                    z-index: 99991 !important;
+                    overflow-y: auto !important;
+                    transform: translateX(-100%) !important;
+                    transition: transform 0.3s ease !important;
+                    padding: 60px 20px 20px !important;
+                    box-sizing: border-box !important;
+                    display: block !important;
+                }
+
+                .dd-shop-sidebar.is-open {
+                    transform: translateX(0) !important;
+                    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.2) !important;
+                }
+
+                body.dd-sidebar-open {
+                    overflow: hidden;
+                }
+
+                .dd-sidebar-close-btn {
+                    display: block;
+                    position: absolute;
+                    top: 14px;
+                    right: 14px;
+                    border: none;
+                    background: none;
+                    font-size: 26px;
+                    line-height: 1;
+                    cursor: pointer;
+                    color: #777;
+                    padding: 4px;
+                    z-index: 1;
+                }
+
+                .dd-sidebar-close-btn:hover {
+                    color: #111;
+                }
+            }
         </style>
         <script>
             /* Tab switcher: ensures only the active panel is shown on desktop, and
@@ -3651,6 +3742,84 @@ class Silvertell_Woocommerce_Customisation
                             $item.children('.dd-buy-acc-body').stop(true, true).slideDown(220);
                         }
                     });
+                });
+            })(jQuery);
+        </script>
+        <script>
+            /* Mobile shop sidebar: converts the WooCommerce filter sidebar into a
+               slide-in modal triggered by a FILTERS button on screens ≤ 767px.
+               Detects the sidebar by looking for WooCommerce filter widgets inside
+               common sidebar containers; no-ops if none are found (e.g. single
+               product pages with no sidebar). */
+            (function($) {
+                $(function() {
+                    var MQ = window.matchMedia('(max-width: 767px)');
+
+                    var filterWidgetSelector = [
+                        '.woocommerce-widget-layered-nav',
+                        '.widget_price_filter',
+                        '.widget_product_categories',
+                        '.widget_layered_nav',
+                        '.wc-layered-nav'
+                    ].join(',');
+
+                    var $sidebar = $([
+                        'aside.widget-area',
+                        '#secondary',
+                        '.woocommerce-sidebar',
+                        '.sidebar',
+                        '[class*="shop-sidebar"]'
+                    ].join(',')).filter(function() {
+                        return $(this).find(filterWidgetSelector).length > 0;
+                    }).first();
+
+                    if (!$sidebar.length) return;
+
+                    var $productsArea = $(
+                        '.woocommerce-products-header, .woocommerce-result-count, form.woocommerce-ordering, ul.products'
+                    ).first();
+
+                    if (!$productsArea.length) return;
+
+                    var $overlay  = $('<div class="dd-sidebar-overlay" aria-hidden="true"></div>').appendTo('body');
+                    var $closeBtn = $('<button class="dd-sidebar-close-btn" aria-label="Close filters">×</button>');
+                    var $filterBtn = $(
+                        '<button class="dd-filter-btn" aria-expanded="false" aria-controls="dd-shop-sidebar">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                        '<path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>' +
+                        ' FILTERS</button>'
+                    );
+
+                    $sidebar.addClass('dd-shop-sidebar').attr('id', 'dd-shop-sidebar').prepend($closeBtn);
+                    $filterBtn.insertBefore($productsArea);
+
+                    function openFilters() {
+                        $sidebar.addClass('is-open');
+                        $overlay.addClass('is-active');
+                        $('body').addClass('dd-sidebar-open');
+                        $filterBtn.attr('aria-expanded', 'true');
+                    }
+
+                    function closeFilters() {
+                        $sidebar.removeClass('is-open');
+                        $overlay.removeClass('is-active');
+                        $('body').removeClass('dd-sidebar-open');
+                        $filterBtn.attr('aria-expanded', 'false');
+                    }
+
+                    $filterBtn.on('click', openFilters);
+                    $closeBtn.on('click', closeFilters);
+                    $overlay.on('click', closeFilters);
+                    $(document).on('keydown', function(e) {
+                        if (e.key === 'Escape' && $sidebar.hasClass('is-open')) closeFilters();
+                    });
+
+                    function onBreakpointChange() {
+                        if (!MQ.matches) closeFilters();
+                    }
+
+                    if (MQ.addEventListener) MQ.addEventListener('change', onBreakpointChange);
+                    else MQ.addListener(onBreakpointChange);
                 });
             })(jQuery);
         </script>
@@ -4087,6 +4256,7 @@ class Silvertell_Woocommerce_Customisation
         $screen = get_current_screen();
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
+    
         <style>
             .dd-panel-wrapper {
                 padding: 10px 20px 20px !important;

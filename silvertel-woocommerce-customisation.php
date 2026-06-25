@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.10
+ * Version: 2.43.11
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1988,7 +1988,10 @@ class Silvertell_Woocommerce_Customisation
     {
         $icon = '<svg class="dd-doc-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 
-        return '<a class="dd-doc-btn" href="' . esc_url($url) . '" target="_blank" rel="noopener" download>'
+        // PDFs open inline in a new tab; other file types keep force-downloading.
+        $download_attr = silvertell_url_is_pdf($url) ? '' : ' download';
+
+        return '<a class="dd-doc-btn" href="' . esc_url($url) . '" target="_blank" rel="noopener"' . $download_attr . '>'
             . $icon
             . '<span class="dd-doc-btn-label">' . esc_html($label) . '</span></a>';
     }
@@ -4570,6 +4573,19 @@ function silvertell_define_buy_samples_elementor_widget()
 }
 
 /**
+ * Whether a file URL points at a PDF (by extension). PDFs are opened inline in a
+ * new tab rather than force-downloaded by the document buttons.
+ */
+function silvertell_url_is_pdf($url)
+{
+    $path = parse_url((string) $url, PHP_URL_PATH);
+    if (! is_string($path) || $path === '') {
+        $path = (string) $url;
+    }
+    return strtolower((string) pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
+}
+
+/**
  * Declare the "Document Link" Elementor widget class.
  *
  * Lets the editor pick any product-support post and set custom button text;
@@ -4661,7 +4677,10 @@ function silvertell_define_document_link_elementor_widget()
 
             $icon = '<svg class="dd-doc-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 
-            echo '<a class="dd-doc-btn" href="' . esc_url($file_url) . '" target="_blank" rel="noopener" download>'
+            // PDFs open inline in a new tab; other file types keep force-downloading.
+            $download_attr = silvertell_url_is_pdf($file_url) ? '' : ' download';
+
+            echo '<a class="dd-doc-btn" href="' . esc_url($file_url) . '" target="_blank" rel="noopener"' . $download_attr . '>'
                 . $icon
                 . '<span class="dd-doc-btn-label">' . esc_html($button_text) . '</span></a>';
         }

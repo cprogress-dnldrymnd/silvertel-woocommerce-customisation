@@ -151,7 +151,14 @@ The major subsystems:
   `.dd-view-product-holder` div. If the product has a non-empty `_features` array, a
   `<ul class="dd-loop-features">` is output above it; each `<li>` gets a CSS checkmark
   (`::before { content: "\2713" }`) in the brand colour. CSS for both elements is in
-  `inject_frontend_assets`.
+  `inject_frontend_assets`. When the theme adds `.products.product-list` (activated by
+  `?shop_view=list_view`), `inject_frontend_assets` also provides a **list-view layout**:
+  `.product-inner` is a flex row with a 260 px thumbnail column (left) and
+  `.product-content-wrapper` (right). A small JS snippet at the bottom of the method
+  moves `.dd-loop-features` and `.dd-view-product-holder` (printed as siblings of
+  `.product-wrapper` by the shop-loop hook) into `.product-content-wrapper` at DOM-ready,
+  so the right column contains description → features → CTA in flow order. Stacks to a
+  single column below 767 px.
 
 - **Responsive layout** (`inject_frontend_assets`, fires on all WooCommerce pages via `is_woocommerce()`, responsive behaviour below 768px): the native WooCommerce
   single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open,

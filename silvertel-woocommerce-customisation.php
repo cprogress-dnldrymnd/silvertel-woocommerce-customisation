@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.12
+ * Version: 2.43.13
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2799,12 +2799,12 @@ class Silvertell_Woocommerce_Customisation
             }
 
             /* ---- List view layout (?shop_view=list_view) ----
-               The theme's list container is `.products.product-list`. The plugin
-               injects `.dd-loop-features` and `.dd-view-product-holder` as siblings
-               of `.product-wrapper`, while the image/title/description live a couple
-               of levels deeper inside `.product-inner`. Flatten the two wrappers with
-               `display: contents` so every piece becomes a grid item of `.product`,
-               then lay them out as image (left) + content/features/CTA (right). */
+               The theme's list container is `.products.product-list`. The shop-loop
+               hook prints `.dd-loop-features` and `.dd-view-product-holder` as
+               siblings of `.product-wrapper`; the JS at the foot of this method moves
+               them into `.product-content-wrapper` so the whole right column lives in
+               one element. `.product-inner` is then a simple flex row: image (left) +
+               content/features/CTA (right). */
             .products.product-list {
                 display: flex;
                 flex-direction: column;
@@ -2812,31 +2812,25 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .products.product-list .product {
-                display: grid;
-                grid-template-columns: 300px 1fr;
-                grid-template-areas:
-                    "thumb content"
-                    "thumb features"
-                    "thumb button";
-                grid-template-rows: auto 1fr auto;
-                column-gap: 40px;
-                row-gap: 18px;
-                align-items: start;
-                padding: 32px;
+                padding: 28px 32px;
             }
 
-            .products.product-list .product-wrapper,
             .products.product-list .product-inner {
-                display: contents;
+                display: flex;
+                align-items: stretch;
+                gap: 40px;
             }
 
             .products.product-list .product-thumbnail-wrapper {
-                grid-area: thumb;
-                align-self: center;
+                flex: 0 0 260px;
+                max-width: 260px;
+                display: flex;
+                align-items: center;
             }
 
             .products.product-list .product-thumbnail {
                 width: 100%;
+                margin: 0;
                 aspect-ratio: 1 / 1;
                 background: #fff;
                 border-radius: 12px;
@@ -2852,8 +2846,11 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .products.product-list .product-content-wrapper {
-                grid-area: content;
+                flex: 1 1 auto;
+                min-width: 0;
                 padding: 0;
+                display: flex;
+                flex-direction: column;
             }
 
             .products.product-list .product-brand {
@@ -2891,7 +2888,7 @@ class Silvertell_Woocommerce_Customisation
                 color: #52525B;
                 font-size: 15px;
                 line-height: 1.65;
-                margin: 0;
+                margin: 0 0 18px;
             }
 
             /* Hide the theme's duplicate "Read more" anchor — the dd CTA below is used. */
@@ -2900,12 +2897,10 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .products.product-list .dd-loop-features {
-                grid-area: features;
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 8px 28px;
-                margin: 0;
-                align-self: start;
+                margin: 0 0 22px;
             }
 
             .products.product-list .dd-loop-features li {
@@ -2913,10 +2908,8 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .products.product-list .dd-view-product-holder {
-                grid-area: button;
+                margin-top: auto;
                 text-align: left;
-                align-self: end;
-                margin-top: 8px;
             }
 
             .products.product-list .dd-view-product-holder .dd-view-product {
@@ -2927,18 +2920,17 @@ class Silvertell_Woocommerce_Customisation
 
             @media (max-width: 767px) {
                 .products.product-list .product {
-                    grid-template-columns: 1fr;
-                    grid-template-areas:
-                        "thumb"
-                        "content"
-                        "features"
-                        "button";
-                    grid-template-rows: auto;
-                    row-gap: 16px;
-                    padding: 20px;
+                    padding: 18px;
                 }
 
-                .products.product-list .product-thumbnail {
+                .products.product-list .product-inner {
+                    flex-direction: column;
+                    gap: 18px;
+                }
+
+                .products.product-list .product-thumbnail-wrapper {
+                    flex-basis: auto;
+                    width: 100%;
                     max-width: 320px;
                     margin: 0 auto;
                 }
@@ -3812,6 +3804,24 @@ class Silvertell_Woocommerce_Customisation
                             $(this).attr('aria-expanded', 'true');
                             $item.children('.dd-buy-acc-body').stop(true, true).slideDown(220);
                         }
+                    });
+                });
+            })(jQuery);
+        </script>
+        <script>
+            /* List view (?shop_view=list_view): the shop-loop hook prints the features
+               list and View Product button as siblings of `.product-wrapper`, which
+               sits them full-width below the card. Move them into
+               `.product-content-wrapper` so they flow under the description in the
+               right-hand column. */
+            (function($) {
+                $(function() {
+                    $('.products.product-list .product').each(function() {
+                        var $p = $(this);
+                        var $content = $p.find('.product-content-wrapper').first();
+                        if (!$content.length) return;
+                        $content.append($p.children('.dd-loop-features'));
+                        $content.append($p.children('.dd-view-product-holder'));
                     });
                 });
             })(jQuery);

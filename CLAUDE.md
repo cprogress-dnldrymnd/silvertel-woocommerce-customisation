@@ -130,9 +130,12 @@ The major subsystems:
   they render via the separate "Product Features" Elementor widget; the distributor "Buy
   Samples" block is likewise its own Elementor widget; and there is a **Document Link**
   Elementor widget (`silvertell_define_document_link_elementor_widget`) that lets the
-  editor pick any `product-support` post and render a single download-button link to its
+  editor pick any `product-support` post and render a single document-button link to its
   `pdf_file` (supports both attachment-ID and raw URL values for that meta, shows
-  placeholder text in the editor if no document or file is set). All three are registered
+  placeholder text in the editor if no document or file is set). PDF URLs open inline in
+  a new tab (no `download` attribute); other file types force-download — detected by the
+  top-level helper `silvertell_url_is_pdf($url)` (extension check), which is also used
+  by the Documents tab's `render_document_button` method. All three are registered
   in `register_elementor_widgets`, defined by top-level
   `silvertell_define_*_elementor_widget` functions. The Evaluation Boards tab
   (`render_evaluation_boards_tab`) renders a card per linked board

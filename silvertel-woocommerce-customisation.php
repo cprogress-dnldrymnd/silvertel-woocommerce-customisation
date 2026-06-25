@@ -2742,7 +2742,7 @@ class Silvertell_Woocommerce_Customisation
                 margin-top: auto;
             }
 
-            .dd-view-product-holder .dd-view-product {
+            .dd-view-product-holder .dd-view-product, .products.product-list .product-inner .product-content-wrapper .button {
                 display: inline-block !important;
                 line-height: 1.2;
                 text-decoration: none;
@@ -2764,7 +2764,7 @@ class Silvertell_Woocommerce_Customisation
                 transition: 400ms;
             }
 
-            .dd-view-product-holder .dd-view-product:hover {
+            .dd-view-product-holder .dd-view-product:hover, .products.product-list .product-inner .product-content-wrapper .button:hover {
                 opacity: 0.8;
             }
 

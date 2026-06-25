@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.11
+ * Version: 2.43.12
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2796,6 +2796,165 @@ class Silvertell_Woocommerce_Customisation
                 color: #fff;
                 border-radius: 4px;
                 font-size: 9px;
+            }
+
+            /* ---- List view layout (?shop_view=list_view) ----
+               The theme's list container is `.products.product-list`. The plugin
+               injects `.dd-loop-features` and `.dd-view-product-holder` as siblings
+               of `.product-wrapper`, while the image/title/description live a couple
+               of levels deeper inside `.product-inner`. Flatten the two wrappers with
+               `display: contents` so every piece becomes a grid item of `.product`,
+               then lay them out as image (left) + content/features/CTA (right). */
+            .products.product-list {
+                display: flex;
+                flex-direction: column;
+                gap: 24px;
+            }
+
+            .products.product-list .product {
+                display: grid;
+                grid-template-columns: 300px 1fr;
+                grid-template-areas:
+                    "thumb content"
+                    "thumb features"
+                    "thumb button";
+                grid-template-rows: auto 1fr auto;
+                column-gap: 40px;
+                row-gap: 18px;
+                align-items: start;
+                padding: 32px;
+            }
+
+            .products.product-list .product-wrapper,
+            .products.product-list .product-inner {
+                display: contents;
+            }
+
+            .products.product-list .product-thumbnail-wrapper {
+                grid-area: thumb;
+                align-self: center;
+            }
+
+            .products.product-list .product-thumbnail {
+                width: 100%;
+                aspect-ratio: 1 / 1;
+                background: #fff;
+                border-radius: 12px;
+                padding: 20px;
+            }
+
+            .products.product-list .product-thumbnail img {
+                max-width: 100%;
+                max-height: 100%;
+                width: auto;
+                height: auto;
+                object-fit: contain;
+            }
+
+            .products.product-list .product-content-wrapper {
+                grid-area: content;
+                padding: 0;
+            }
+
+            .products.product-list .product-brand {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-bottom: 12px;
+            }
+
+            .products.product-list .product-brand a {
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: #0089FF;
+                background: rgba(0, 137, 255, 0.08);
+                padding: 4px 12px;
+                border-radius: 50px;
+                text-decoration: none;
+                line-height: 1.6;
+            }
+
+            .products.product-list .product-title {
+                font-size: 24px;
+                line-height: 1.2;
+                margin: 0 0 12px;
+            }
+
+            .products.product-list .product-title a {
+                color: #111;
+                text-decoration: none;
+            }
+
+            .products.product-list .product-description {
+                color: #52525B;
+                font-size: 15px;
+                line-height: 1.65;
+                margin: 0;
+            }
+
+            /* Hide the theme's duplicate "Read more" anchor — the dd CTA below is used. */
+            .products.product-list .product-content-wrapper > a.button {
+                display: none !important;
+            }
+
+            .products.product-list .dd-loop-features {
+                grid-area: features;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px 28px;
+                margin: 0;
+                align-self: start;
+            }
+
+            .products.product-list .dd-loop-features li {
+                margin-bottom: 0;
+            }
+
+            .products.product-list .dd-view-product-holder {
+                grid-area: button;
+                text-align: left;
+                align-self: end;
+                margin-top: 8px;
+            }
+
+            .products.product-list .dd-view-product-holder .dd-view-product {
+                width: auto;
+                min-width: 240px;
+                padding: 12px 36px;
+            }
+
+            @media (max-width: 767px) {
+                .products.product-list .product {
+                    grid-template-columns: 1fr;
+                    grid-template-areas:
+                        "thumb"
+                        "content"
+                        "features"
+                        "button";
+                    grid-template-rows: auto;
+                    row-gap: 16px;
+                    padding: 20px;
+                }
+
+                .products.product-list .product-thumbnail {
+                    max-width: 320px;
+                    margin: 0 auto;
+                }
+
+                .products.product-list .dd-loop-features {
+                    grid-template-columns: 1fr;
+                }
+
+                .products.product-list .dd-view-product-holder {
+                    text-align: center;
+                }
+
+                .products.product-list .dd-view-product-holder .dd-view-product {
+                    width: 100%;
+                    min-width: 0;
+                }
             }
 
             /* ---- Single-product tabs become an accordion below 768px ---- */

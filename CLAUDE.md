@@ -149,16 +149,9 @@ The major subsystems:
   `woocommerce_after_shop_loop_item`): the theme strips WooCommerce's native loop button,
   so this re-adds a "View Product" permalink anchor (`.dd-view-product`) wrapped in a
   `.dd-view-product-holder` div. If the product has a non-empty `_features` array, a
-  `<ul class="dd-loop-features">` is output above it; each `<li>` gets a CSS checkmark
-  (`::before { content: "\2713" }`) in the brand colour. CSS for both elements is in
-  `inject_frontend_assets`. When the theme adds `.products.product-list` (activated by
-  `?shop_view=list_view`), `inject_frontend_assets` also provides a **list-view layout**:
-  `.product-inner` is a flex row with a 260 px thumbnail column (left) and
-  `.product-content-wrapper` (right). A small JS snippet at the bottom of the method
-  moves `.dd-loop-features` and `.dd-view-product-holder` (printed as siblings of
-  `.product-wrapper` by the shop-loop hook) into `.product-content-wrapper` at DOM-ready,
-  so the right column contains description → features → CTA in flow order. Stacks to a
-  single column below 767 px.
+  `<ul class="dd-loop-features">` is output above it, capped at the **first 5 non-empty
+  features**; each `<li>` gets a CSS checkmark (`::before { content: "\2713" }`) in the
+  brand colour. CSS for both elements is in `inject_frontend_assets`.
 
 - **Responsive layout** (`inject_frontend_assets`, fires on all WooCommerce pages via `is_woocommerce()`, responsive behaviour below 768px): the native WooCommerce
   single-product tabs (`.woocommerce-tabs ul.tabs.wc-tabs`) become a single-open,
@@ -170,12 +163,7 @@ The major subsystems:
   `render_range_table` and `render_eb_board_table`) becoming the row's visible label via
   CSS `::before`. The `.dd-range-nav` sub-tabs (Product Range / Evaluation Boards
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
-  font size and padding. On shop/archive pages a **mobile sidebar filter modal** is also
-  injected: the script detects a sidebar containing WooCommerce filter widgets (layered
-  nav, price filter, product categories) and on screens ≤ 767px converts it into a fixed
-  slide-in panel (`.dd-shop-sidebar`) with a dark overlay (`.dd-sidebar-overlay`), a
-  close button, and a `.dd-filter-btn` "FILTERS" button inserted before the products
-  area. No-ops silently if no filter sidebar is found (e.g. single product pages).
+  font size and padding.
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,

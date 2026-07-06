@@ -4186,6 +4186,7 @@ class Silvertell_Woocommerce_Customisation
                 font-weight: 600;
                 margin-bottom: 6px;
                 color: #50575e;
+                margin: 0;
             }
 
             .dd-field-group input[type="text"],
@@ -4197,6 +4198,7 @@ class Silvertell_Woocommerce_Customisation
                 border-radius: 3px;
                 background: #fff;
                 box-sizing: border-box;
+                float: none !important;
             }
 
             .dd-file-wrap {

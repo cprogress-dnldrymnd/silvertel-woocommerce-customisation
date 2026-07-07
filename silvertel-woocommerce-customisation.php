@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.44.0
+ * Version: 2.44.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2643,17 +2643,21 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * On a product-category archive, collapse the grid's `.product-brand` list
-     * (built by the theme via wc_get_product_category_list → get_the_term_list,
-     * which runs its link array through this `term_links-product_cat` filter) down
-     * to a single link for the category currently being viewed.
+     * Rework the grid `.product-brand` list for a product card. The theme builds it
+     * via wc_get_product_category_list → get_the_term_list, whose link array runs
+     * through this `term_links-product_cat` filter, so this is the single choke point
+     * for every product grid (native shop/archive loops *and* Elementor Products
+     * widgets, which run their own query — hence we can't rely on `in_the_loop()`).
      *
-     * Scoped tightly so nothing else is touched: only on a product_cat archive and
-     * only while inside the main products loop (`in_the_loop()`), so category term
-     * links rendered elsewhere on the page (breadcrumbs, subcategory tiles, widgets)
-     * keep their normal output. The single product page is handled separately by
-     * render_single_product_parent_brand(), which builds its markup directly and so
-     * never reaches this filter.
+     *   - On a product-category archive: show the category currently being viewed.
+     *   - On any other product grid (main shop page, custom/Elementor pages): show
+     *     the top-level parent category instead of the deepest subcategory.
+     *
+     * Scoped by the card's post type (`product`) so category term links rendered
+     * elsewhere (breadcrumbs, subcategory tiles, non-product content) are untouched.
+     * The single product page is handled by render_single_product_parent_brand(),
+     * which prints its markup directly and never reaches this filter — we also bail
+     * on is_product() as a guard.
      *
      * @param string[] $links Array of category anchor HTML for the current product.
      * @return string[]
@@ -2661,16 +2665,61 @@ class Silvertell_Woocommerce_Customisation
     public function filter_grid_brand_to_current_category($links)
     {
         if (is_admin()) return $links;
-        if (! function_exists('is_product_category') || ! is_product_category()) return $links;
-        if (! in_the_loop()) return $links;
+        if (function_exists('is_product') && is_product()) return $links;
 
-        $term = get_queried_object();
-        if (! ($term instanceof WP_Term)) return $links;
+        // Only touch category lists belonging to a product card.
+        $post_id = get_the_ID();
+        if (! $post_id || get_post_type($post_id) !== 'product') return $links;
 
-        $url = get_term_link($term);
-        if (is_wp_error($url)) return $links;
+        // Category archive: collapse to the single category being viewed.
+        if (function_exists('is_product_category') && is_product_category()) {
+            $term = get_queried_object();
+            if (! ($term instanceof WP_Term)) return $links;
 
-        return ['<a href="' . esc_url($url) . '" rel="tag">' . esc_html($term->name) . '</a>'];
+            $url = get_term_link($term);
+            if (is_wp_error($url)) return $links;
+
+            return ['<a href="' . esc_url($url) . '" rel="tag">' . esc_html($term->name) . '</a>'];
+        }
+
+        // Everywhere else: show the top-level parent category, not the subcategory.
+        return $this->top_level_category_links($post_id, $links);
+    }
+
+    /**
+     * Build category anchors from each of a product's assigned categories reduced to
+     * its top-level ancestor (walking `parent` up to the root), de-duplicated so a
+     * product filed under several subcategories of one parent shows that parent once.
+     * Returns $fallback unchanged if nothing resolves.
+     *
+     * @param int      $product_id
+     * @param string[] $fallback Links to return if no top-level category resolves.
+     * @return string[]
+     */
+    private function top_level_category_links($product_id, $fallback = [])
+    {
+        $terms = get_the_terms($product_id, 'product_cat');
+        if (empty($terms) || is_wp_error($terms)) return $fallback;
+
+        $tops = [];
+        foreach ($terms as $term) {
+            $top = $term;
+            while ($top->parent) {
+                $parent = get_term($top->parent, 'product_cat');
+                if (! $parent || is_wp_error($parent)) break;
+                $top = $parent;
+            }
+            $tops[$top->term_id] = $top;
+        }
+
+        $links = [];
+        foreach ($tops as $top) {
+            $url = get_term_link($top);
+            if (is_wp_error($url)) continue;
+            $links[] = '<a href="' . esc_url($url) . '" rel="tag">' . esc_html($top->name) . '</a>';
+        }
+
+        return empty($links) ? $fallback : $links;
     }
 
     /**
@@ -2702,27 +2751,7 @@ class Silvertell_Woocommerce_Customisation
         global $product;
         if (! $product) return;
 
-        $terms = get_the_terms($product->get_id(), 'product_cat');
-        if (empty($terms) || is_wp_error($terms)) return;
-
-        $tops = [];
-        foreach ($terms as $term) {
-            $top = $term;
-            while ($top->parent) {
-                $parent = get_term($top->parent, 'product_cat');
-                if (! $parent || is_wp_error($parent)) break;
-                $top = $parent;
-            }
-            $tops[$top->term_id] = $top;
-        }
-
-        $links = [];
-        foreach ($tops as $top) {
-            $url = get_term_link($top);
-            if (is_wp_error($url)) continue;
-            $links[] = '<a href="' . esc_url($url) . '" rel="tag">' . esc_html($top->name) . '</a>';
-        }
-
+        $links = $this->top_level_category_links($product->get_id());
         if (empty($links)) return;
 
         echo '<div class="product-brand">' . implode(', ', $links) . '</div>';

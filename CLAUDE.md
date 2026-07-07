@@ -165,23 +165,37 @@ The major subsystems:
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
   font size and padding.
 
-- **Shop-page category link rewrite** (`inject_frontend_assets`, gated on `is_shop()`):
-  Elementor's Products widget links product categories to an on-page filter
-  (`?filter_cat=<term_id>`); a small inline script maps every `product_cat` term to its
-  real `get_term_link()` archive URL and rewrites `a[href*="filter_cat="]` on
-  `DOMContentLoaded` so they navigate to the category archive instead.
+- **Shop-page category filter redirect** (`redirect_shop_filter_cat_to_archive`, on
+  `template_redirect`, gated on `is_shop()`): Elementor's Products widget filters product
+  categories on-page via `?filter_cat=<term_id>`, and its pagination preserves that param
+  (`/products/page/2/?filter_cat=88`). This 301-redirects a **single-category**
+  `filter_cat` to the real `get_term_link()` `/product-category/<slug>/` archive
+  (preserving the `paged` page number), so category clicks and their pagination behave
+  like the category-archive template. **Multi-category** filters (`filter_cat=72,88`, from
+  the `.Filter` panel) have no single archive equivalent, so they're left as on-page
+  filters. (Replaces an earlier client-side JS rewrite that only handled the category
+  anchors and not pagination.)
 
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
-  `maybe_override_single_product_brand` / `render_single_product_parent_brand`): the theme
-  prints a `.product-brand` category-links block via `wc_get_product_category_list`
-  (shop-loop cards) and its own `fynode_single_product_brand` function (single product,
-  on `woocommerce_single_product_summary` priority 4) — both showing the deepest assigned
-  subcategory. On a category **archive** grid, `filter_grid_brand_to_current_category`
-  hooks the `term_links-product_cat` filter (scoped to `is_product_category()` +
-  `in_the_loop()`) to collapse the list down to just the category being viewed. On the
-  **single product** page, `maybe_override_single_product_brand` swaps out the theme's
-  action for `render_single_product_parent_brand`, which walks each assigned category up
-  to its top-level (`parent === 0`) ancestor and prints those instead — a no-op if the
+  `top_level_category_links` / `maybe_override_single_product_brand` /
+  `render_single_product_parent_brand`): the theme prints a `.product-brand`
+  category-links block via `wc_get_product_category_list` (shop-loop cards, and any
+  Elementor Products widget grid, which runs its own query) and its own
+  `fynode_single_product_brand` function (single product, on
+  `woocommerce_single_product_summary` priority 4) — both showing the deepest assigned
+  subcategory. `filter_grid_brand_to_current_category` hooks the
+  `term_links-product_cat` filter as the single choke point for every product grid,
+  scoped by the card's post type (`product`, via `get_the_ID()`/`get_post_type()`) rather
+  than `in_the_loop()` so it also works on Elementor's separate query, and bails on
+  `is_product()` so the single-product page is untouched:
+    - On a category **archive** grid it collapses the list to just the category being
+      viewed.
+    - On **any other product grid** (main shop page, custom/Elementor pages) it shows
+      the top-level parent category instead, via the shared private helper
+      `top_level_category_links($product_id, $fallback)`.
+  On the **single product** page, `maybe_override_single_product_brand` swaps out the
+  theme's action for `render_single_product_parent_brand`, which calls the same
+  `top_level_category_links` helper and prints those links instead — a no-op if the
   theme's action isn't registered under that exact name/priority.
 
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.13
+ * Version: 2.44.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -65,6 +65,13 @@ class Silvertell_Woocommerce_Customisation
         // Shop/archive grid: the theme strips the native loop button, so add a
         // "View Product" link back onto each card (standard WC loop-button hook).
         add_action('woocommerce_after_shop_loop_item', [$this, 'add_shop_loop_view_button'], 10);
+
+        // Product `.product-brand` block (rendered by the theme via
+        // wc_get_product_category_list): on a category archive show the category
+        // currently being viewed, and on the single product page show only the
+        // top-level parent category instead of the deepest subcategory.
+        add_filter('term_links-product_cat', [$this, 'filter_grid_brand_to_current_category']);
+        add_action('wp', [$this, 'maybe_override_single_product_brand']);
 
         // Elementor: register the standalone "Product Features" and "Buy Samples" widgets.
         add_action('elementor/widgets/register', [$this, 'register_elementor_widgets']);
@@ -2633,6 +2640,92 @@ class Silvertell_Woocommerce_Customisation
             esc_url(get_permalink($product->get_id())),
             esc_html__('View Product', 'silvertell-wc-customisation')
         );
+    }
+
+    /**
+     * On a product-category archive, collapse the grid's `.product-brand` list
+     * (built by the theme via wc_get_product_category_list → get_the_term_list,
+     * which runs its link array through this `term_links-product_cat` filter) down
+     * to a single link for the category currently being viewed.
+     *
+     * Scoped tightly so nothing else is touched: only on a product_cat archive and
+     * only while inside the main products loop (`in_the_loop()`), so category term
+     * links rendered elsewhere on the page (breadcrumbs, subcategory tiles, widgets)
+     * keep their normal output. The single product page is handled separately by
+     * render_single_product_parent_brand(), which builds its markup directly and so
+     * never reaches this filter.
+     *
+     * @param string[] $links Array of category anchor HTML for the current product.
+     * @return string[]
+     */
+    public function filter_grid_brand_to_current_category($links)
+    {
+        if (is_admin()) return $links;
+        if (! function_exists('is_product_category') || ! is_product_category()) return $links;
+        if (! in_the_loop()) return $links;
+
+        $term = get_queried_object();
+        if (! ($term instanceof WP_Term)) return $links;
+
+        $url = get_term_link($term);
+        if (is_wp_error($url)) return $links;
+
+        return ['<a href="' . esc_url($url) . '" rel="tag">' . esc_html($term->name) . '</a>'];
+    }
+
+    /**
+     * On the single product page, replace the theme's `.product-brand` output with
+     * the product's top-level parent category instead of the deepest subcategory.
+     *
+     * The theme prints the brand via the plain function `fynode_single_product_brand`
+     * on `woocommerce_single_product_summary` (priority 4). We swap it for our own
+     * renderer at the same priority — but only if the theme's action is actually
+     * registered, so this stays a no-op should the theme change.
+     */
+    public function maybe_override_single_product_brand()
+    {
+        if (! function_exists('is_product') || ! is_product()) return;
+
+        if (remove_action('woocommerce_single_product_summary', 'fynode_single_product_brand', 4)) {
+            add_action('woocommerce_single_product_summary', [$this, 'render_single_product_parent_brand'], 4);
+        }
+    }
+
+    /**
+     * Render the `.product-brand` block for the single product page using each
+     * assigned category's top-level ancestor (walking `parent` up to the root),
+     * de-duplicated so a product filed under several subcategories of the same
+     * parent shows that parent once.
+     */
+    public function render_single_product_parent_brand()
+    {
+        global $product;
+        if (! $product) return;
+
+        $terms = get_the_terms($product->get_id(), 'product_cat');
+        if (empty($terms) || is_wp_error($terms)) return;
+
+        $tops = [];
+        foreach ($terms as $term) {
+            $top = $term;
+            while ($top->parent) {
+                $parent = get_term($top->parent, 'product_cat');
+                if (! $parent || is_wp_error($parent)) break;
+                $top = $parent;
+            }
+            $tops[$top->term_id] = $top;
+        }
+
+        $links = [];
+        foreach ($tops as $top) {
+            $url = get_term_link($top);
+            if (is_wp_error($url)) continue;
+            $links[] = '<a href="' . esc_url($url) . '" rel="tag">' . esc_html($top->name) . '</a>';
+        }
+
+        if (empty($links)) return;
+
+        echo '<div class="product-brand">' . implode(', ', $links) . '</div>';
     }
 
     public function inject_frontend_assets()

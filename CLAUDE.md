@@ -165,6 +165,25 @@ The major subsystems:
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
   font size and padding.
 
+- **Shop-page category link rewrite** (`inject_frontend_assets`, gated on `is_shop()`):
+  Elementor's Products widget links product categories to an on-page filter
+  (`?filter_cat=<term_id>`); a small inline script maps every `product_cat` term to its
+  real `get_term_link()` archive URL and rewrites `a[href*="filter_cat="]` on
+  `DOMContentLoaded` so they navigate to the category archive instead.
+
+- **`.product-brand` override** (`filter_grid_brand_to_current_category` /
+  `maybe_override_single_product_brand` / `render_single_product_parent_brand`): the theme
+  prints a `.product-brand` category-links block via `wc_get_product_category_list`
+  (shop-loop cards) and its own `fynode_single_product_brand` function (single product,
+  on `woocommerce_single_product_summary` priority 4) — both showing the deepest assigned
+  subcategory. On a category **archive** grid, `filter_grid_brand_to_current_category`
+  hooks the `term_links-product_cat` filter (scoped to `is_product_category()` +
+  `in_the_loop()`) to collapse the list down to just the category being viewed. On the
+  **single product** page, `maybe_override_single_product_brand` swaps out the theme's
+  action for `render_single_product_parent_brand`, which walks each assigned category up
+  to its top-level (`parent === 0`) ancestor and prints those instead — a no-op if the
+  theme's action isn't registered under that exact name/priority.
+
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,
   jQuery-UI sortable drag handles, and `wp.media` file pickers (`.dd-upload-file` →

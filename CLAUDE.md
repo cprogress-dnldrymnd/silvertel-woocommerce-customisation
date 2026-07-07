@@ -167,14 +167,15 @@ The major subsystems:
 
 - **Shop-page category filter redirect** (`redirect_shop_filter_cat_to_archive`, on
   `template_redirect`, gated on `is_shop()`): Elementor's Products widget filters product
-  categories on-page via `?filter_cat=<term_id>`, and its pagination preserves that param
-  (`/products/page/2/?filter_cat=88`). This 301-redirects a **single-category**
-  `filter_cat` to the real `get_term_link()` `/product-category/<slug>/` archive
-  (preserving the `paged` page number), so category clicks and their pagination behave
-  like the category-archive template. **Multi-category** filters (`filter_cat=72,88`, from
-  the `.Filter` panel) have no single archive equivalent, so they're left as on-page
-  filters. (Replaces an earlier client-side JS rewrite that only handled the category
-  anchors and not pagination.)
+  categories on-page via `?filter_cat=<term_id>`. This 301-redirects a **single-category**
+  `filter_cat` to the real `get_term_link()` `/product-category/<slug>/` archive, so
+  category clicks behave like the category-archive template. The **page number is
+  intentionally dropped** — on shop page N the widget's category links inherit `/page/N/`,
+  but a clicked category always lands on page 1 of that category (carrying the page over
+  can hit an empty page for a category with fewer products). **Multi-category** filters
+  (`filter_cat=72,88`, from the `.Filter` panel) have no single archive equivalent, so
+  they're left as on-page filters. (Replaces an earlier client-side JS rewrite that only
+  handled the category anchors and not pagination.)
 
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
   `top_level_category_links` / `maybe_override_single_product_brand` /

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.44.2
+ * Version: 2.44.3
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -953,11 +953,15 @@ class Silvertell_Woocommerce_Customisation
 
     /**
      * On the main shop page, Elementor's Products widget filters categories on-page
-     * via ?filter_cat=<term_id>, and its pagination preserves that param
-     * (…/products/page/2/?filter_cat=88). Redirect a single-category filter to the
-     * real /product-category/<slug>/ archive so navigation (and its pagination)
-     * matches the category-archive template. Multi-category filters (filter_cat=72,88)
-     * have no single archive equivalent, so they are left as on-page filters.
+     * via ?filter_cat=<term_id>. Redirect a single-category filter to the real
+     * /product-category/<slug>/ archive so navigation matches the category-archive
+     * template. Multi-category filters (filter_cat=72,88) have no single archive
+     * equivalent, so they are left as on-page filters.
+     *
+     * The page number is deliberately dropped: on shop page N, the widget's category
+     * links inherit /page/N/, but a clicked category should always land on page 1 of
+     * that category (carrying the page over can hit an empty page for a category with
+     * fewer products).
      */
     public function redirect_shop_filter_cat_to_archive()
     {
@@ -976,12 +980,6 @@ class Silvertell_Woocommerce_Customisation
 
         $url = get_term_link($term);
         if (is_wp_error($url)) return;
-
-        // Preserve pagination: /products/page/2/?filter_cat=88 -> .../<slug>/page/2/
-        $paged = (int) get_query_var('paged');
-        if ($paged > 1) {
-            $url = trailingslashit($url) . 'page/' . $paged . '/';
-        }
 
         wp_safe_redirect($url, 301);
         exit;

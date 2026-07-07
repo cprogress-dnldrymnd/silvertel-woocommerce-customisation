@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.43.12
+ * Version: 2.43.13
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3661,6 +3661,45 @@ class Silvertell_Woocommerce_Customisation
             })(jQuery);
         </script>
     <?php
+        // On the main shop page, Elementor's Products widget links product
+        // categories to an on-page filter (?filter_cat=<term_id>). Rewrite those
+        // links to the real /product-category/ archive URLs so they navigate the
+        // same way the category-archive template does. Only runs on the shop page.
+        if (function_exists('is_shop') && is_shop()) {
+            $cat_terms = get_terms([
+                'taxonomy'   => 'product_cat',
+                'hide_empty' => false,
+            ]);
+            $cat_links = [];
+            if (! is_wp_error($cat_terms)) {
+                foreach ($cat_terms as $cat_term) {
+                    $link = get_term_link($cat_term);
+                    if (! is_wp_error($link)) {
+                        $cat_links[$cat_term->term_id] = $link;
+                    }
+                }
+            }
+    ?>
+        <script>
+            (function() {
+                var catLinks = <?php echo wp_json_encode($cat_links); ?>;
+                function rewriteFilterCatLinks() {
+                    document.querySelectorAll('a[href*="filter_cat="]').forEach(function(a) {
+                        var m = a.getAttribute('href').match(/[?&]filter_cat=(\d+)/);
+                        if (m && catLinks[m[1]]) {
+                            a.setAttribute('href', catLinks[m[1]]);
+                        }
+                    });
+                }
+                if (document.readyState !== 'loading') {
+                    rewriteFilterCatLinks();
+                } else {
+                    document.addEventListener('DOMContentLoaded', rewriteFilterCatLinks);
+                }
+            })();
+        </script>
+    <?php
+        }
     }
 
     private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null, $post_id = null)

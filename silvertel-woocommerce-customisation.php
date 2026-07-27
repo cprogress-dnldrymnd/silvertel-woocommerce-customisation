@@ -3183,7 +3183,7 @@ class Silvertell_Woocommerce_Customisation
                 padding: 2.375rem;
                 display: flex;
                 flex-direction: column;
-                border: 1px solid #E0E0E0;
+                border: 1px solid #0089FF;
             }
 
             .product .product-wrapper.product-background .product-content-wrapper {
@@ -3214,7 +3214,8 @@ class Silvertell_Woocommerce_Customisation
                 margin-top: auto;
             }
 
-            .dd-view-product-holder .dd-view-product, .products.product-list .product-inner .product-content-wrapper .button {
+            .dd-view-product-holder .dd-view-product,
+            .products.product-list .product-inner .product-content-wrapper .button {
                 display: inline-block !important;
                 line-height: 1.2;
                 text-decoration: none;
@@ -3236,7 +3237,8 @@ class Silvertell_Woocommerce_Customisation
                 transition: 400ms;
             }
 
-            .dd-view-product-holder .dd-view-product:hover, .products.product-list .product-inner .product-content-wrapper .button:hover {
+            .dd-view-product-holder .dd-view-product:hover,
+            .products.product-list .product-inner .product-content-wrapper .button:hover {
                 opacity: 0.8;
             }
 
@@ -3257,7 +3259,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-loop-features li::before {
                 content: "\2713";
-                background-color: var(--e-global-color-c172edd);
+                color: var(--e-global-color-c172edd);
                 font-weight: 700;
                 flex: 0 0 18px;
                 width: 18px;
@@ -3265,9 +3267,8 @@ class Silvertell_Woocommerce_Customisation
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                color: #fff;
                 border-radius: 4px;
-                font-size: 9px;
+                font-size: 14px;
             }
 
             /* ---- Single-product tabs become an accordion below 768px ---- */
@@ -3402,14 +3403,14 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-doc-btn:hover {
-                background: var( --e-global-color-c172edd );
-                border-color: var( --e-global-color-c172edd );
+                background: var(--e-global-color-c172edd);
+                border-color: var(--e-global-color-c172edd);
                 color: #fff;
             }
 
             .dd-doc-icon {
                 flex: 0 0 auto;
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
                 transition: color 0.15s ease;
             }
 
@@ -3872,15 +3873,15 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item:hover {
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
                 background: #f6f7f7;
             }
 
             .dd-range-nav-item.dd-range-nav-item.dd-range-nav-item.active {
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
                 background: #fff;
                 border-color: #e0e0e0;
-                border-bottom-color: var( --e-global-color-c172edd );
+                border-bottom-color: var(--e-global-color-c172edd);
             }
 
             /* ---- Range sub-tab nav: same underlined tabs as desktop, just tighter ---- */
@@ -4213,7 +4214,7 @@ class Silvertell_Woocommerce_Customisation
                 });
             })(jQuery);
         </script>
-    <?php
+        <?php
         // On the main shop page, Elementor's Products widget links product categories
         // to an on-page filter (?filter_cat=<term_id>). Rewrite those links to the real
         // /product-category/<slug>/ archive URL so they navigate like the category-archive
@@ -4233,68 +4234,74 @@ class Silvertell_Woocommerce_Customisation
                     }
                 }
             }
-    ?>
-        <script>
-            (function() {
-                var catLinks = <?php echo wp_json_encode($cat_links); ?>;
+        ?>
+            <script>
+                (function() {
+                    var catLinks = <?php echo wp_json_encode($cat_links); ?>;
 
-                // Map a filter_cat link's href to its category-archive URL, or null.
-                // Single category only — multi-category filters (e.g. filter_cat=72,88
-                // from the .Filter panel) have no single archive, so leave them be.
-                function archiveFor(href) {
-                    if (! href) return null;
-                    var m = href.match(/[?&]filter_cat=([^&#]+)/);
-                    if (! m) return null;
-                    var val = decodeURIComponent(m[1]);
-                    if (! /^\d+$/.test(val)) return null;
-                    return catLinks[val] || null;
-                }
+                    // Map a filter_cat link's href to its category-archive URL, or null.
+                    // Single category only — multi-category filters (e.g. filter_cat=72,88
+                    // from the .Filter panel) have no single archive, so leave them be.
+                    function archiveFor(href) {
+                        if (!href) return null;
+                        var m = href.match(/[?&]filter_cat=([^&#]+)/);
+                        if (!m) return null;
+                        var val = decodeURIComponent(m[1]);
+                        if (!/^\d+$/.test(val)) return null;
+                        return catLinks[val] || null;
+                    }
 
-                // Rewrite the visible hrefs so hover / copy-link / open-in-new-tab all
-                // use the real archive URL. Re-run after Elementor AJAX pagination or
-                // filtering re-injects links (MutationObserver below).
-                function rewrite() {
-                    var links = document.querySelectorAll('a[href*="filter_cat="]');
-                    for (var i = 0; i < links.length; i++) {
-                        var target = archiveFor(links[i].getAttribute('href'));
-                        if (target && links[i].getAttribute('href') !== target) {
-                            links[i].setAttribute('href', target);
+                    // Rewrite the visible hrefs so hover / copy-link / open-in-new-tab all
+                    // use the real archive URL. Re-run after Elementor AJAX pagination or
+                    // filtering re-injects links (MutationObserver below).
+                    function rewrite() {
+                        var links = document.querySelectorAll('a[href*="filter_cat="]');
+                        for (var i = 0; i < links.length; i++) {
+                            var target = archiveFor(links[i].getAttribute('href'));
+                            if (target && links[i].getAttribute('href') !== target) {
+                                links[i].setAttribute('href', target);
+                            }
                         }
                     }
-                }
 
-                // Intercept plain left-clicks so Elementor's own filter handler can't
-                // re-apply ?filter_cat via AJAX before a rewrite pass catches the link;
-                // force a normal navigation to the archive instead. Modified clicks
-                // (new tab, etc.) fall through to the rewritten href.
-                document.addEventListener('click', function(e) {
-                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    var a = e.target && e.target.closest ? e.target.closest('a[href*="filter_cat="]') : null;
-                    if (! a) return;
-                    var target = archiveFor(a.getAttribute('href'));
-                    if (! target) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.location.href = target;
-                }, true);
+                    // Intercept plain left-clicks so Elementor's own filter handler can't
+                    // re-apply ?filter_cat via AJAX before a rewrite pass catches the link;
+                    // force a normal navigation to the archive instead. Modified clicks
+                    // (new tab, etc.) fall through to the rewritten href.
+                    document.addEventListener('click', function(e) {
+                        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                        var a = e.target && e.target.closest ? e.target.closest('a[href*="filter_cat="]') : null;
+                        if (!a) return;
+                        var target = archiveFor(a.getAttribute('href'));
+                        if (!target) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.location.href = target;
+                    }, true);
 
-                function start() {
-                    rewrite();
-                    if (window.MutationObserver && document.body) {
-                        var scheduled = false;
-                        new MutationObserver(function() {
-                            if (scheduled) return;
-                            scheduled = true;
-                            setTimeout(function() { scheduled = false; rewrite(); }, 50);
-                        }).observe(document.body, { childList: true, subtree: true });
+                    function start() {
+                        rewrite();
+                        if (window.MutationObserver && document.body) {
+                            var scheduled = false;
+                            new MutationObserver(function() {
+                                if (scheduled) return;
+                                scheduled = true;
+                                setTimeout(function() {
+                                    scheduled = false;
+                                    rewrite();
+                                }, 50);
+                            }).observe(document.body, {
+                                childList: true,
+                                subtree: true
+                            });
+                        }
                     }
-                }
 
-                if (document.readyState !== 'loading') start();
-                else document.addEventListener('DOMContentLoaded', start);
-            })();
-        </script>
-    <?php
+                    if (document.readyState !== 'loading') start();
+                    else document.addEventListener('DOMContentLoaded', start);
+                })();
+            </script>
+            <?php
         }
 
         // Nested attribute filters under each product category in the sidebar's
@@ -4304,132 +4311,138 @@ class Silvertell_Woocommerce_Customisation
         if ((function_exists('is_shop') && is_shop()) || (function_exists('is_product_category') && is_product_category())) {
             $cat_attr_payload = $this->build_category_attribute_sidebar_payload();
             if (! empty($cat_attr_payload)) {
-    ?>
-        <script>
-            (function() {
-                var catData = <?php echo wp_json_encode($cat_attr_payload); ?>;
-                var bySlug = {};
-                Object.keys(catData).forEach(function(id) {
-                    bySlug[catData[id].slug] = id;
-                });
-
-                // Resolve an anchor's href to a product_cat term id we have data for, via
-                // either ?filter_cat=<id> (shop page) or /product-category/.../<slug>/
-                // (category archive widgets link straight to the archive).
-                function findCatId(href) {
-                    if (! href) return null;
-                    var m = href.match(/[?&]filter_cat=([^&#]+)/);
-                    if (m) {
-                        var val = decodeURIComponent(m[1]);
-                        return (/^\d+$/.test(val) && catData[val]) ? val : null;
-                    }
-                    m = href.match(/\/product-category\/([^?#]+)/);
-                    if (m) {
-                        var parts = m[1].split('/').filter(Boolean);
-                        var slug = parts[parts.length - 1];
-                        return (slug && bySlug[slug]) ? bySlug[slug] : null;
-                    }
-                    return null;
-                }
-
-                function buildAttrsBlock(data) {
-                    var wrap = document.createElement('div');
-                    wrap.className = 'dd-cat-attrs';
-
-                    data.attrs.forEach(function(attr) {
-                        var group = document.createElement('div');
-                        group.className = 'dd-cat-attr' + (data.current ? ' is-open' : '');
-
-                        var toggle = document.createElement('button');
-                        toggle.type = 'button';
-                        toggle.className = 'dd-cat-attr-toggle';
-                        toggle.setAttribute('aria-expanded', data.current ? 'true' : 'false');
-                        toggle.textContent = attr.label;
-                        group.appendChild(toggle);
-
-                        var list = document.createElement('ul');
-                        list.className = 'dd-cat-attr-values';
-                        attr.terms.forEach(function(term) {
-                            var item = document.createElement('li');
-                            var link = document.createElement('a');
-                            link.className = 'dd-attr-opt' + (term.active ? ' is-active' : '');
-                            link.setAttribute('href', term.href);
-                            link.appendChild(document.createTextNode(term.name + ' '));
-                            var count = document.createElement('span');
-                            count.className = 'dd-attr-count';
-                            count.textContent = '(' + term.count + ')';
-                            link.appendChild(count);
-                            item.appendChild(link);
-                            list.appendChild(item);
+            ?>
+                <script>
+                    (function() {
+                        var catData = <?php echo wp_json_encode($cat_attr_payload); ?>;
+                        var bySlug = {};
+                        Object.keys(catData).forEach(function(id) {
+                            bySlug[catData[id].slug] = id;
                         });
-                        group.appendChild(list);
-                        wrap.appendChild(group);
-                    });
 
-                    if (data.clear_url) {
-                        var clear = document.createElement('a');
-                        clear.className = 'dd-cat-attr-clear';
-                        clear.setAttribute('href', data.clear_url);
-                        clear.textContent = '<?php echo esc_js(__('Clear filters', 'silvertell-wc-customisation')); ?>';
-                        wrap.appendChild(clear);
-                    }
+                        // Resolve an anchor's href to a product_cat term id we have data for, via
+                        // either ?filter_cat=<id> (shop page) or /product-category/.../<slug>/
+                        // (category archive widgets link straight to the archive).
+                        function findCatId(href) {
+                            if (!href) return null;
+                            var m = href.match(/[?&]filter_cat=([^&#]+)/);
+                            if (m) {
+                                var val = decodeURIComponent(m[1]);
+                                return (/^\d+$/.test(val) && catData[val]) ? val : null;
+                            }
+                            m = href.match(/\/product-category\/([^?#]+)/);
+                            if (m) {
+                                var parts = m[1].split('/').filter(Boolean);
+                                var slug = parts[parts.length - 1];
+                                return (slug && bySlug[slug]) ? bySlug[slug] : null;
+                            }
+                            return null;
+                        }
 
-                    return wrap;
-                }
+                        function buildAttrsBlock(data) {
+                            var wrap = document.createElement('div');
+                            wrap.className = 'dd-cat-attrs';
 
-                function inject() {
-                    var anchors = document.querySelectorAll('a[href]');
-                    for (var i = 0; i < anchors.length; i++) {
-                        var a = anchors[i];
-                        if (a.closest('.products') || a.closest('.woocommerce-breadcrumb') || a.closest('.dd-cat-attrs')) continue;
-                        var li = a.closest('li');
-                        if (! li || li.getAttribute('data-dd-attrs')) continue;
-                        var catId = findCatId(a.getAttribute('href'));
-                        if (! catId) continue;
-                        li.setAttribute('data-dd-attrs', '1');
-                        li.appendChild(buildAttrsBlock(catData[catId]));
-                    }
-                }
+                            data.attrs.forEach(function(attr) {
+                                var group = document.createElement('div');
+                                group.className = 'dd-cat-attr' + (data.current ? ' is-open' : '');
 
-                // Expand/collapse an attribute's value list (independent, not single-open).
-                document.addEventListener('click', function(e) {
-                    var toggle = e.target && e.target.closest ? e.target.closest('.dd-cat-attr-toggle') : null;
-                    if (! toggle) return;
-                    e.preventDefault();
-                    var group = toggle.closest('.dd-cat-attr');
-                    var open = group.classList.toggle('is-open');
-                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-                }, false);
+                                var toggle = document.createElement('button');
+                                toggle.type = 'button';
+                                toggle.className = 'dd-cat-attr-toggle';
+                                toggle.setAttribute('aria-expanded', data.current ? 'true' : 'false');
+                                toggle.textContent = attr.label;
+                                group.appendChild(toggle);
 
-                // Force a normal navigation on value/clear clicks — same capture-phase
-                // guard as the filter_cat rewrite, so neither Elementor's own filter
-                // handler nor the theme's PJAX AjaxFilter swallows the click.
-                document.addEventListener('click', function(e) {
-                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    var a = e.target && e.target.closest ? e.target.closest('a.dd-attr-opt, a.dd-cat-attr-clear') : null;
-                    if (! a) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.location.href = a.getAttribute('href');
-                }, true);
+                                var list = document.createElement('ul');
+                                list.className = 'dd-cat-attr-values';
+                                attr.terms.forEach(function(term) {
+                                    var item = document.createElement('li');
+                                    var link = document.createElement('a');
+                                    link.className = 'dd-attr-opt' + (term.active ? ' is-active' : '');
+                                    link.setAttribute('href', term.href);
+                                    link.appendChild(document.createTextNode(term.name + ' '));
+                                    var count = document.createElement('span');
+                                    count.className = 'dd-attr-count';
+                                    count.textContent = '(' + term.count + ')';
+                                    link.appendChild(count);
+                                    item.appendChild(link);
+                                    list.appendChild(item);
+                                });
+                                group.appendChild(list);
+                                wrap.appendChild(group);
+                            });
 
-                function start() {
-                    inject();
-                    if (window.MutationObserver && document.body) {
-                        var scheduled = false;
-                        new MutationObserver(function() {
-                            if (scheduled) return;
-                            scheduled = true;
-                            setTimeout(function() { scheduled = false; inject(); }, 50);
-                        }).observe(document.body, { childList: true, subtree: true });
-                    }
-                }
+                            if (data.clear_url) {
+                                var clear = document.createElement('a');
+                                clear.className = 'dd-cat-attr-clear';
+                                clear.setAttribute('href', data.clear_url);
+                                clear.textContent = '<?php echo esc_js(__('Clear filters', 'silvertell-wc-customisation')); ?>';
+                                wrap.appendChild(clear);
+                            }
 
-                if (document.readyState !== 'loading') start();
-                else document.addEventListener('DOMContentLoaded', start);
-            })();
-        </script>
-    <?php
+                            return wrap;
+                        }
+
+                        function inject() {
+                            var anchors = document.querySelectorAll('a[href]');
+                            for (var i = 0; i < anchors.length; i++) {
+                                var a = anchors[i];
+                                if (a.closest('.products') || a.closest('.woocommerce-breadcrumb') || a.closest('.dd-cat-attrs')) continue;
+                                var li = a.closest('li');
+                                if (!li || li.getAttribute('data-dd-attrs')) continue;
+                                var catId = findCatId(a.getAttribute('href'));
+                                if (!catId) continue;
+                                li.setAttribute('data-dd-attrs', '1');
+                                li.appendChild(buildAttrsBlock(catData[catId]));
+                            }
+                        }
+
+                        // Expand/collapse an attribute's value list (independent, not single-open).
+                        document.addEventListener('click', function(e) {
+                            var toggle = e.target && e.target.closest ? e.target.closest('.dd-cat-attr-toggle') : null;
+                            if (!toggle) return;
+                            e.preventDefault();
+                            var group = toggle.closest('.dd-cat-attr');
+                            var open = group.classList.toggle('is-open');
+                            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                        }, false);
+
+                        // Force a normal navigation on value/clear clicks — same capture-phase
+                        // guard as the filter_cat rewrite, so neither Elementor's own filter
+                        // handler nor the theme's PJAX AjaxFilter swallows the click.
+                        document.addEventListener('click', function(e) {
+                            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                            var a = e.target && e.target.closest ? e.target.closest('a.dd-attr-opt, a.dd-cat-attr-clear') : null;
+                            if (!a) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.location.href = a.getAttribute('href');
+                        }, true);
+
+                        function start() {
+                            inject();
+                            if (window.MutationObserver && document.body) {
+                                var scheduled = false;
+                                new MutationObserver(function() {
+                                    if (scheduled) return;
+                                    scheduled = true;
+                                    setTimeout(function() {
+                                        scheduled = false;
+                                        inject();
+                                    }, 50);
+                                }).observe(document.body, {
+                                    childList: true,
+                                    subtree: true
+                                });
+                            }
+                        }
+
+                        if (document.readyState !== 'loading') start();
+                        else document.addEventListener('DOMContentLoaded', start);
+                    })();
+                </script>
+        <?php
             }
         }
     }
@@ -4472,7 +4485,7 @@ class Silvertell_Woocommerce_Customisation
         $input_attr = $is_template ? 'disabled="disabled"' : '';
         $base       = 'buy_links[' . $meta_key . ']';
         $title      = $label !== '' ? $label : ($url !== '' ? $url : 'New Link');
-    ?>
+        ?>
         <div class="<?php echo esc_attr($row_class); ?>">
             <div class="dd-repeater-header">
                 <div class="dd-header-left">
@@ -4864,7 +4877,7 @@ class Silvertell_Woocommerce_Customisation
         $screen = get_current_screen();
         if (! $screen || ! in_array($screen->id, ['product', 'product-support', 'evaluation-board', 'woocommerce_page_silvertell-file-importer'], true)) return;
     ?>
-    
+
         <style>
             .dd-panel-wrapper {
                 padding: 10px 20px 20px !important;
@@ -4873,7 +4886,7 @@ class Silvertell_Woocommerce_Customisation
             .dd-repeater-header-title {
                 margin-bottom: 15px;
                 font-size: 14px;
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
             }
 
             .dd-repeater-container {
@@ -4927,7 +4940,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .dd-repeater-actions span:hover {
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
             }
 
             .dd-repeater-actions .dd-delete-row:hover {
@@ -4985,7 +4998,7 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-file-display {
                 font-weight: 500;
-                color: var( --e-global-color-c172edd );
+                color: var(--e-global-color-c172edd);
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;

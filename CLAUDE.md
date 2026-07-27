@@ -231,6 +231,18 @@ The major subsystems:
   `top_level_category_links` helper and prints those links instead — a no-op if the
   theme's action isn't registered under that exact name/priority.
 
+- **Related products narrowing** (`related_products_subcategory_terms` on
+  `woocommerce_get_related_product_cat_terms`, `exclude_child_products_from_related` on
+  `woocommerce_related_products`, plus `woocommerce_product_related_posts_relate_by_tag`
+  forced `false`): WooCommerce's native related-products block otherwise matches by *every*
+  assigned category (including the broad top-level one) and by tag, pulling in
+  loosely-related products. `related_products_subcategory_terms` keeps only the deepest
+  (leaf) assigned `product_cat` terms — a term is a leaf when no other assigned term is its
+  descendant — falling back to the full set if a product is filed solely under top-level
+  categories. `exclude_child_products_from_related` then drops any result with a
+  `post_parent` (sub-range/variant products), since those redirect on the frontend. If
+  nothing shares the leaf subcategory the block legitimately renders empty.
+
 - **Native repeater UI** (`inject_repeater_assets`, printed to `admin_footer`): all the
   inline CSS/JS powering the `.dd-repeater-*` rows — add/duplicate/delete/collapse,
   jQuery-UI sortable drag handles, and `wp.media` file pickers (`.dd-upload-file` →

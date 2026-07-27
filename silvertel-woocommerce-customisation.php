@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.44.4
+ * Version: 2.46.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -73,6 +73,14 @@ class Silvertell_Woocommerce_Customisation
         add_filter('term_links-product_cat', [$this, 'filter_grid_brand_to_current_category']);
         add_action('wp', [$this, 'maybe_override_single_product_brand']);
 
+        // Related products: relate only by the product's deepest (leaf) subcategory —
+        // never its broad top-level category — and drop child products from the results.
+        // When nothing shares that subcategory WooCommerce returns an empty set, so the
+        // related-products block renders nothing and the section hides itself.
+        add_filter('woocommerce_get_related_product_cat_terms', [$this, 'related_products_subcategory_terms'], 10, 2);
+        add_filter('woocommerce_product_related_posts_relate_by_tag', '__return_false');
+        add_filter('woocommerce_related_products', [$this, 'exclude_child_products_from_related'], 10, 3);
+
         // Elementor: register the standalone "Product Features" and "Buy Samples" widgets.
         add_action('elementor/widgets/register', [$this, 'register_elementor_widgets']);
 
@@ -90,6 +98,16 @@ class Silvertell_Woocommerce_Customisation
         // Frontend shop/archive: exclude child products from all WooCommerce product
         // listings — they surface only inside their parent's Product Range tab.
         add_action('woocommerce_product_query', [$this, 'hide_child_products_from_shop']);
+
+        // Sidebar category-attribute filters (nested under each product category in the
+        // Elementor category widget): narrow the shop/archive query by ?sil_pa_<attr>=…,
+        // and invalidate the cached category→attribute map whenever the underlying data
+        // could have changed.
+        add_action('woocommerce_product_query', [$this, 'filter_products_by_attributes']);
+        add_action('save_post_product', [$this, 'flush_category_attribute_map']);
+        add_action('deleted_post', [$this, 'flush_category_attribute_map']);
+        add_action('edited_term', [$this, 'flush_category_attribute_map']);
+        add_action('delete_term', [$this, 'flush_category_attribute_map']);
 
         // Child Products manager on the product edit screen (tree list + add/delete + a
         // popup editor for Title / Content / Categories / SKU / Attributes / Buy Samples).
@@ -991,6 +1009,159 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
+     * Read the sidebar attribute filters from the URL: ?sil_pa_<attribute>=<slug>[,<slug>].
+     * A dedicated `sil_` prefix (not WooCommerce's own `filter_<attr>`) so WC_Query never
+     * builds its own tax_query for these — that would look for terms directly on the
+     * top-level product, but the terms actually live on its hidden child/variant products.
+     * Returns [ 'pa_x' => ['5v', '12v'], ... ], restricted to real global attributes.
+     */
+    private function get_active_attribute_filters()
+    {
+        $choices = $this->get_attribute_taxonomy_choices();
+        $active  = [];
+        foreach ($_GET as $key => $value) {
+            if (! preg_match('/^sil_(pa_[a-z0-9_\-]+)$/', (string) $key, $m)) continue;
+            $tax = $m[1];
+            if (! isset($choices[$tax])) continue;
+            $slugs = array_values(array_filter(array_map('sanitize_title', explode(',', (string) $value)), 'strlen'));
+            if (! empty($slugs)) $active[$tax] = $slugs;
+        }
+        return $active;
+    }
+
+    /**
+     * Narrow the shop/category product query to top-level products whose branch (self or
+     * any descendant child/variant product) carries the selected attribute terms. OR
+     * within one attribute's selected values, AND across different attributes.
+     */
+    public function filter_products_by_attributes($query)
+    {
+        $active = $this->get_active_attribute_filters();
+        if (empty($active)) return;
+
+        $matched_root_ids = null;
+        foreach ($active as $tax => $slugs) {
+            $terms = get_terms(['taxonomy' => $tax, 'slug' => $slugs, 'hide_empty' => false, 'fields' => 'ids']);
+            if (is_wp_error($terms) || empty($terms)) {
+                $matched_root_ids = [];
+                break;
+            }
+
+            $object_ids = get_objects_in_term($terms, $tax);
+            if (is_wp_error($object_ids) || empty($object_ids)) {
+                $matched_root_ids = [];
+                break;
+            }
+
+            $root_ids = [];
+            foreach ($object_ids as $object_id) {
+                $root_ids[$this->get_root_product_id($object_id)] = true;
+            }
+            $root_ids = array_keys($root_ids);
+
+            $matched_root_ids = is_null($matched_root_ids) ? $root_ids : array_intersect($matched_root_ids, $root_ids);
+            if (empty($matched_root_ids)) break;
+        }
+
+        $matched_root_ids = empty($matched_root_ids) ? [0] : array_values($matched_root_ids);
+
+        $existing = $query->get('post__in');
+        if (! empty($existing) && is_array($existing)) {
+            $matched_root_ids = array_values(array_intersect($existing, $matched_root_ids));
+            if (empty($matched_root_ids)) $matched_root_ids = [0];
+        }
+        $query->set('post__in', $matched_root_ids);
+    }
+
+    /**
+     * Append/replace the sil_pa_* query args on an archive URL for a given set of
+     * [ 'pa_x' => ['slug1','slug2'] ] filters. Empty filter arrays are omitted entirely.
+     */
+    private function build_filtered_archive_url($base_url, $filters)
+    {
+        $args = [];
+        foreach ($filters as $tax => $slugs) {
+            if (! empty($slugs)) $args['sil_' . $tax] = implode(',', $slugs);
+        }
+        return empty($args) ? $base_url : add_query_arg($args, $base_url);
+    }
+
+    /**
+     * Build the JSON payload consumed by the sidebar attribute-filter injection script:
+     * for every product_cat with attribute data, its archive URL plus, for each attribute,
+     * its terms with a pre-computed href (toggling the term on/off when this is the
+     * category currently being viewed, or a fresh single-value filter otherwise).
+     */
+    private function build_category_attribute_sidebar_payload()
+    {
+        $map = $this->get_category_attribute_map();
+        if (empty($map)) return [];
+
+        $queried_term_id = 0;
+        if (function_exists('is_product_category') && is_product_category()) {
+            $queried = get_queried_object();
+            if ($queried instanceof WP_Term) $queried_term_id = (int) $queried->term_id;
+        }
+        $active_filters = $this->get_active_attribute_filters();
+
+        $payload = [];
+        foreach ($map as $cat_id => $taxes) {
+            $term = get_term($cat_id, 'product_cat');
+            if (! $term || is_wp_error($term)) continue;
+
+            $archive_url = get_term_link($term);
+            if (is_wp_error($archive_url)) continue;
+
+            $is_current = ($cat_id === $queried_term_id);
+            $cat_attrs  = [];
+
+            foreach ($taxes as $tax => $data) {
+                $terms_out = [];
+                foreach ($data['terms'] as $slug => $term_data) {
+                    $is_active = $is_current && ! empty($active_filters[$tax]) && in_array($slug, $active_filters[$tax], true);
+
+                    if ($is_current) {
+                        $new_filters = $active_filters;
+                        $current_slugs = $new_filters[$tax] ?? [];
+                        if ($is_active) {
+                            $current_slugs = array_values(array_diff($current_slugs, [$slug]));
+                        } else {
+                            $current_slugs = array_values(array_unique(array_merge($current_slugs, [$slug])));
+                        }
+                        $new_filters[$tax] = $current_slugs;
+                        $href = $this->build_filtered_archive_url($archive_url, $new_filters);
+                    } else {
+                        $href = $this->build_filtered_archive_url($archive_url, [$tax => [$slug]]);
+                    }
+
+                    $terms_out[] = [
+                        'slug'   => $slug,
+                        'name'   => $term_data['name'],
+                        'count'  => $term_data['count'],
+                        'active' => $is_active,
+                        'href'   => $href,
+                    ];
+                }
+                if (! empty($terms_out)) {
+                    $cat_attrs[] = ['label' => $data['label'], 'terms' => $terms_out];
+                }
+            }
+
+            if (empty($cat_attrs)) continue;
+
+            $payload[$cat_id] = [
+                'term_id'   => (int) $cat_id,
+                'slug'      => $term->slug,
+                'current'   => $is_current,
+                'clear_url' => ($is_current && ! empty($active_filters)) ? $archive_url : '',
+                'attrs'     => $cat_attrs,
+            ];
+        }
+
+        return $payload;
+    }
+
+    /**
      * On the Products list screen, recompute the per-status counts (All / Published /
      * Trash …) to count only top-level products, matching the hidden-children list.
      */
@@ -1374,6 +1545,7 @@ class Silvertell_Woocommerce_Customisation
         }
 
         if (! $root) $root = $parent_id ?: $saved_id;
+        $this->flush_category_attribute_map();
         wp_send_json_success(['list' => $this->render_child_products_list($root)]);
     }
 
@@ -1392,6 +1564,7 @@ class Silvertell_Woocommerce_Customisation
 
         $this->delete_product_branch($child_id);
 
+        $this->flush_category_attribute_map();
         wp_send_json_success(['list' => $this->render_child_products_list($root)]);
     }
 
@@ -2253,6 +2426,121 @@ class Silvertell_Woocommerce_Customisation
         return '';
     }
 
+    /**
+     * A product's own ID plus every descendant product ID (children, grandchildren, …),
+     * built on get_child_products(). Used to pull attribute terms from a whole "range"
+     * branch even though the terms live only on hidden child/variant products.
+     */
+    private function collect_descendant_product_ids($product_id)
+    {
+        $ids = [(int) $product_id];
+        foreach ($this->get_child_products($product_id) as $child) {
+            $ids = array_merge($ids, $this->collect_descendant_product_ids($child->ID));
+        }
+        return $ids;
+    }
+
+    /**
+     * Walk post_parent up to the top-level ancestor. Child/variant products are hidden
+     * from every frontend listing, so any attribute match on a descendant must resolve
+     * back up to the product that actually appears in the grid.
+     */
+    private function get_root_product_id($product_id)
+    {
+        $id = (int) $product_id;
+        for ($i = 0; $i < 20; $i++) {
+            $parent = (int) wp_get_post_parent_id($id);
+            if (! $parent) break;
+            $id = $parent;
+        }
+        return $id;
+    }
+
+    /**
+     * [ product_cat term_id => [ 'pa_x' => [ 'label' => 'X', 'terms' => [ slug => ['name'=>,'count'=>] ] ] ] ]
+     * for every global attribute with at least one value inside that category (including
+     * values that live only on hidden child/variant products of a top-level product).
+     * Categories aggregate the attributes of every descendant category too. Built once
+     * per 12h in a transient — this walks the whole catalogue and must not run per request.
+     */
+    private function get_category_attribute_map()
+    {
+        $cached = get_transient('silvertell_cat_attr_map');
+        if (is_array($cached)) return $cached;
+
+        $attr_choices = $this->get_attribute_taxonomy_choices();
+        $map = [];
+        if (empty($attr_choices)) {
+            set_transient('silvertell_cat_attr_map', $map, 12 * HOUR_IN_SECONDS);
+            return $map;
+        }
+
+        $top_level_ids = get_posts([
+            'post_type'   => 'product',
+            'post_status' => 'publish',
+            'post_parent' => 0,
+            'numberposts' => -1,
+            'fields'      => 'ids',
+        ]);
+
+        foreach ($top_level_ids as $product_id) {
+            $cat_ids = wp_get_post_terms($product_id, 'product_cat', ['fields' => 'ids']);
+            if (empty($cat_ids) || is_wp_error($cat_ids)) continue;
+
+            $expanded_cat_ids = [];
+            foreach ($cat_ids as $cat_id) {
+                $expanded_cat_ids[$cat_id] = true;
+                foreach (get_ancestors($cat_id, 'product_cat', 'taxonomy') as $ancestor_id) {
+                    $expanded_cat_ids[$ancestor_id] = true;
+                }
+            }
+
+            $branch_ids = $this->collect_descendant_product_ids($product_id);
+
+            foreach ($attr_choices as $tax => $label) {
+                $terms = wp_get_object_terms($branch_ids, $tax, ['fields' => 'all']);
+                if (empty($terms) || is_wp_error($terms)) continue;
+
+                $seen_slugs = [];
+                foreach ($terms as $term) {
+                    $seen_slugs[$term->slug] = $term->name;
+                }
+
+                foreach (array_keys($expanded_cat_ids) as $cat_id) {
+                    if (! isset($map[$cat_id][$tax])) {
+                        $map[$cat_id][$tax] = ['label' => $label, 'terms' => []];
+                    }
+                    foreach ($seen_slugs as $slug => $name) {
+                        if (! isset($map[$cat_id][$tax]['terms'][$slug])) {
+                            $map[$cat_id][$tax]['terms'][$slug] = ['name' => $name, 'count' => 0];
+                        }
+                        $map[$cat_id][$tax]['terms'][$slug]['count']++;
+                    }
+                }
+            }
+        }
+
+        foreach ($map as $cat_id => $taxes) {
+            foreach ($taxes as $tax => $data) {
+                uasort($map[$cat_id][$tax]['terms'], function ($a, $b) {
+                    return strnatcasecmp($a['name'], $b['name']);
+                });
+            }
+        }
+
+        set_transient('silvertell_cat_attr_map', $map, 12 * HOUR_IN_SECONDS);
+        return $map;
+    }
+
+    /**
+     * Drop the cached category→attribute map so the next sidebar render rebuilds it.
+     * Hooked to product saves/deletes and product_cat term edits.
+     */
+    public function flush_category_attribute_map()
+    {
+        delete_transient('silvertell_cat_attr_map');
+    }
+
     private function product_has_visible_attributes($product)
     {
         foreach ($product->get_attributes() as $attr) {
@@ -2757,6 +3045,64 @@ class Silvertell_Woocommerce_Customisation
         echo '<div class="product-brand">' . implode(', ', $links) . '</div>';
     }
 
+    /**
+     * Restrict WooCommerce's related-products category matching to the product's deepest
+     * (leaf) subcategories — the same "subcategory" notion used for the `.product-brand`
+     * block. WooCommerce would otherwise relate by *every* assigned category, including the
+     * broad top-level one, pulling in loosely-related products; matching only the leaf
+     * subcategory keeps related products specific to it.
+     *
+     * A term is a leaf when no other assigned term is its descendant (WooCommerce/importers
+     * often assign the whole ancestry, so both "Isolators" and "Isolators > Digital
+     * Isolators" may be present — we keep only the latter). If a product is filed solely
+     * under top-level categories, those remain (the deepest it has) so related products
+     * still work rather than always hiding.
+     *
+     * @param int[] $term_ids   product_cat term IDs WooCommerce will match on.
+     * @param int   $product_id The product being viewed.
+     * @return int[]
+     */
+    public function related_products_subcategory_terms($term_ids, $product_id)
+    {
+        if (empty($term_ids) || ! is_array($term_ids)) return $term_ids;
+
+        $term_ids = array_values(array_unique(array_map('intval', $term_ids)));
+
+        $leaves = [];
+        foreach ($term_ids as $tid) {
+            $is_ancestor = false;
+            foreach ($term_ids as $other) {
+                if ($other === $tid) continue;
+                if (in_array($tid, get_ancestors($other, 'product_cat'), true)) {
+                    $is_ancestor = true;
+                    break;
+                }
+            }
+            if (! $is_ancestor) $leaves[] = $tid;
+        }
+
+        return ! empty($leaves) ? $leaves : $term_ids;
+    }
+
+    /**
+     * Remove child products (sub-range groups / variants — any product with a post_parent)
+     * from the related-products results. They surface only inside their parent's Product
+     * Range tab and 301-redirect on the frontend, so they must not appear as related cards.
+     *
+     * @param int[] $related_posts Related product IDs.
+     * @param int   $product_id    The product being viewed.
+     * @param array $args          WooCommerce related-products args.
+     * @return int[]
+     */
+    public function exclude_child_products_from_related($related_posts, $product_id, $args)
+    {
+        if (empty($related_posts) || ! is_array($related_posts)) return $related_posts;
+
+        return array_values(array_filter($related_posts, function ($id) {
+            return ! wp_get_post_parent_id((int) $id);
+        }));
+    }
+
     public function inject_frontend_assets()
     {
         if (! function_exists('is_woocommerce') || ! is_woocommerce()) return;
@@ -2837,6 +3183,7 @@ class Silvertell_Woocommerce_Customisation
                 padding: 2.375rem;
                 display: flex;
                 flex-direction: column;
+                border: 1px solid #E0E0E0;
             }
 
             .product .product-wrapper.product-background .product-content-wrapper {
@@ -3603,6 +3950,90 @@ class Silvertell_Woocommerce_Customisation
                 padding-left: 0;
                 padding-right: 0;
             }
+
+            /* Nested attribute filters injected under each product category in the
+               sidebar "Product Categories" widget. */
+            .dd-cat-attrs {
+                margin: 4px 0 10px 18px;
+                padding-left: 10px;
+                border-left: 2px solid #e2e2e2;
+            }
+
+            .dd-cat-attr {
+                margin-bottom: 6px;
+            }
+
+            .dd-cat-attr-toggle {
+                background: none;
+                border: none;
+                padding: 2px 0;
+                margin: 0;
+                font-size: 12px;
+                font-weight: 600;
+                color: #50575e;
+                cursor: pointer;
+                text-align: left;
+            }
+
+            .dd-cat-attr-toggle::before {
+                content: "+";
+                display: inline-block;
+                width: 12px;
+            }
+
+            .dd-cat-attr.is-open>.dd-cat-attr-toggle::before {
+                content: "\2212";
+            }
+
+            .dd-cat-attr-values {
+                list-style: none;
+                margin: 2px 0 0 12px;
+                padding: 0;
+                display: none;
+            }
+
+            .dd-cat-attr.is-open>.dd-cat-attr-values {
+                display: block;
+            }
+
+            .dd-cat-attr-values li {
+                margin: 0;
+                padding: 2px 0;
+            }
+
+            .dd-attr-opt {
+                font-size: 12px;
+                color: #50575e;
+                text-decoration: none;
+            }
+
+            .dd-attr-opt:hover {
+                text-decoration: underline;
+            }
+
+            .dd-attr-opt.is-active {
+                font-weight: 700;
+                color: var(--e-global-color-primary, #1d1d1d);
+            }
+
+            .dd-attr-opt.is-active::before {
+                content: "\2713";
+                display: inline-block;
+                width: 14px;
+                color: var(--e-global-color-primary, #1d1d1d);
+            }
+
+            .dd-attr-count {
+                color: #8c8f94;
+            }
+
+            .dd-cat-attr-clear {
+                display: inline-block;
+                margin: 4px 0 0;
+                font-size: 12px;
+                text-decoration: underline;
+                color: #50575e;
+            }
         </style>
         <script>
             /* Tab switcher: ensures only the active panel is shown on desktop, and
@@ -3864,6 +4295,142 @@ class Silvertell_Woocommerce_Customisation
             })();
         </script>
     <?php
+        }
+
+        // Nested attribute filters under each product category in the sidebar's
+        // "Product Categories" widget (Elementor/theme addon — no server-side hook into
+        // it, so this injects into its rendered markup client-side, same approach as the
+        // filter_cat rewrite above). Shown on the shop page and every category archive.
+        if ((function_exists('is_shop') && is_shop()) || (function_exists('is_product_category') && is_product_category())) {
+            $cat_attr_payload = $this->build_category_attribute_sidebar_payload();
+            if (! empty($cat_attr_payload)) {
+    ?>
+        <script>
+            (function() {
+                var catData = <?php echo wp_json_encode($cat_attr_payload); ?>;
+                var bySlug = {};
+                Object.keys(catData).forEach(function(id) {
+                    bySlug[catData[id].slug] = id;
+                });
+
+                // Resolve an anchor's href to a product_cat term id we have data for, via
+                // either ?filter_cat=<id> (shop page) or /product-category/.../<slug>/
+                // (category archive widgets link straight to the archive).
+                function findCatId(href) {
+                    if (! href) return null;
+                    var m = href.match(/[?&]filter_cat=([^&#]+)/);
+                    if (m) {
+                        var val = decodeURIComponent(m[1]);
+                        return (/^\d+$/.test(val) && catData[val]) ? val : null;
+                    }
+                    m = href.match(/\/product-category\/([^?#]+)/);
+                    if (m) {
+                        var parts = m[1].split('/').filter(Boolean);
+                        var slug = parts[parts.length - 1];
+                        return (slug && bySlug[slug]) ? bySlug[slug] : null;
+                    }
+                    return null;
+                }
+
+                function buildAttrsBlock(data) {
+                    var wrap = document.createElement('div');
+                    wrap.className = 'dd-cat-attrs';
+
+                    data.attrs.forEach(function(attr) {
+                        var group = document.createElement('div');
+                        group.className = 'dd-cat-attr' + (data.current ? ' is-open' : '');
+
+                        var toggle = document.createElement('button');
+                        toggle.type = 'button';
+                        toggle.className = 'dd-cat-attr-toggle';
+                        toggle.setAttribute('aria-expanded', data.current ? 'true' : 'false');
+                        toggle.textContent = attr.label;
+                        group.appendChild(toggle);
+
+                        var list = document.createElement('ul');
+                        list.className = 'dd-cat-attr-values';
+                        attr.terms.forEach(function(term) {
+                            var item = document.createElement('li');
+                            var link = document.createElement('a');
+                            link.className = 'dd-attr-opt' + (term.active ? ' is-active' : '');
+                            link.setAttribute('href', term.href);
+                            link.appendChild(document.createTextNode(term.name + ' '));
+                            var count = document.createElement('span');
+                            count.className = 'dd-attr-count';
+                            count.textContent = '(' + term.count + ')';
+                            link.appendChild(count);
+                            item.appendChild(link);
+                            list.appendChild(item);
+                        });
+                        group.appendChild(list);
+                        wrap.appendChild(group);
+                    });
+
+                    if (data.clear_url) {
+                        var clear = document.createElement('a');
+                        clear.className = 'dd-cat-attr-clear';
+                        clear.setAttribute('href', data.clear_url);
+                        clear.textContent = '<?php echo esc_js(__('Clear filters', 'silvertell-wc-customisation')); ?>';
+                        wrap.appendChild(clear);
+                    }
+
+                    return wrap;
+                }
+
+                function inject() {
+                    var anchors = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < anchors.length; i++) {
+                        var a = anchors[i];
+                        if (a.closest('.products') || a.closest('.woocommerce-breadcrumb') || a.closest('.dd-cat-attrs')) continue;
+                        var li = a.closest('li');
+                        if (! li || li.getAttribute('data-dd-attrs')) continue;
+                        var catId = findCatId(a.getAttribute('href'));
+                        if (! catId) continue;
+                        li.setAttribute('data-dd-attrs', '1');
+                        li.appendChild(buildAttrsBlock(catData[catId]));
+                    }
+                }
+
+                // Expand/collapse an attribute's value list (independent, not single-open).
+                document.addEventListener('click', function(e) {
+                    var toggle = e.target && e.target.closest ? e.target.closest('.dd-cat-attr-toggle') : null;
+                    if (! toggle) return;
+                    e.preventDefault();
+                    var group = toggle.closest('.dd-cat-attr');
+                    var open = group.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                }, false);
+
+                // Force a normal navigation on value/clear clicks — same capture-phase
+                // guard as the filter_cat rewrite, so neither Elementor's own filter
+                // handler nor the theme's PJAX AjaxFilter swallows the click.
+                document.addEventListener('click', function(e) {
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    var a = e.target && e.target.closest ? e.target.closest('a.dd-attr-opt, a.dd-cat-attr-clear') : null;
+                    if (! a) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = a.getAttribute('href');
+                }, true);
+
+                function start() {
+                    inject();
+                    if (window.MutationObserver && document.body) {
+                        var scheduled = false;
+                        new MutationObserver(function() {
+                            if (scheduled) return;
+                            scheduled = true;
+                            setTimeout(function() { scheduled = false; inject(); }, 50);
+                        }).observe(document.body, { childList: true, subtree: true });
+                    }
+                }
+
+                if (document.readyState !== 'loading') start();
+                else document.addEventListener('DOMContentLoaded', start);
+            })();
+        </script>
+    <?php
+            }
         }
     }
 

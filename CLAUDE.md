@@ -183,6 +183,32 @@ The major subsystems:
       handler) for the race window before a rewrite pass catches a freshly-injected link;
       modified clicks (open-in-new-tab, etc.) fall through to the rewritten href.
 
+- **Sidebar category-attribute filters** (`inject_frontend_assets`, gated on `is_shop() ||
+  is_product_category()`): nests global product-attribute filters (e.g. Output Voltage,
+  Power) under each subcategory in the same Elementor "Product Categories" sidebar widget
+  — no server-side hook into that widget exists, so this injects client-side, reusing the
+  filter_cat rewrite's `MutationObserver`/capture-phase-click pattern above.
+    - `get_category_attribute_map()` builds `[ term_id => [ pa_x => ['label', 'terms'] ] ]`
+      once per 12h in the `silvertell_cat_attr_map` transient (a full-catalogue walk),
+      flushed by `flush_category_attribute_map()` on product save/delete, term edit/delete,
+      and at the end of `ajax_child_save`/`ajax_child_delete`. For each top-level product it
+      walks the **whole branch** (`collect_descendant_product_ids`) since attribute terms
+      usually live only on hidden child/variant products, and credits every ancestor
+      category too (`get_ancestors`) so a parent category aggregates its children's values.
+    - Filtering lives behind a dedicated `sil_pa_<attribute>=<slug>[,<slug>]` query-arg
+      prefix (deliberately not WooCommerce's own `filter_<attr>`, which would tax_query
+      against the top-level product directly and match nothing) — `filter_products_by_attributes`
+      (on `woocommerce_product_query`, alongside `hide_child_products_from_shop`) resolves
+      matching terms to objects, maps each back up to its top-level ancestor
+      (`get_root_product_id`), and intersects across attributes (OR within one attribute,
+      AND across attributes).
+    - `build_category_attribute_sidebar_payload()` pre-computes every value's href in PHP:
+      toggling the term in/out of the current filter set for the category being viewed, or a
+      fresh single-value filter for every other category. The injected DOM per category is
+      `.dd-cat-attrs` → `.dd-cat-attr` (name always visible via a `+`/`-` toggle, values
+      collapsed except for the category currently being viewed) → `.dd-attr-opt` links
+      showing a `(count)`.
+
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
   `top_level_category_links` / `maybe_override_single_product_brand` /
   `render_single_product_parent_brand`): the theme prints a `.product-brand`

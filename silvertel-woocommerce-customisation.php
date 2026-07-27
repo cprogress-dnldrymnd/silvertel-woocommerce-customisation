@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.46.0
+ * Version: 2.46.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -4384,11 +4384,20 @@ class Silvertell_Woocommerce_Customisation
                             return wrap;
                         }
 
+                        // Scoped to the single visible desktop sidebar container only. The same
+                        // "Product Categories" widget markup is also duplicated elsewhere on the
+                        // page (e.g. a mobile "Filter Products" off-canvas drawer, and possibly a
+                        // lazy-loaded mega-menu dropdown) — scanning the whole document matched
+                        // those too and produced a stray floating duplicate. #secondary is the
+                        // theme's real shop/category-archive sidebar column (see
+                        // theme/woocommerce/archive-product.php).
                         function inject() {
-                            var anchors = document.querySelectorAll('a[href]');
+                            var container = document.getElementById('secondary');
+                            if (! container) return;
+                            var anchors = container.querySelectorAll('.widget_klb_product_categories a[href]');
                             for (var i = 0; i < anchors.length; i++) {
                                 var a = anchors[i];
-                                if (a.closest('.products') || a.closest('.woocommerce-breadcrumb') || a.closest('.dd-cat-attrs')) continue;
+                                if (a.closest('.dd-cat-attrs')) continue;
                                 var li = a.closest('li');
                                 if (!li || li.getAttribute('data-dd-attrs')) continue;
                                 var catId = findCatId(a.getAttribute('href'));

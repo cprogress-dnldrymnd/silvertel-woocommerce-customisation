@@ -5174,6 +5174,10 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
      * (a hidden checkbox + label, no JS) that reveals its subtree, auto-checked when
      * the visitor is browsing inside that branch. Attribute filters render as a
      * sibling of the (collapsible) subtree, so they stay visible even collapsed.
+     *
+     * @param array $by_parent Array of terms grouped by their parent ID.
+     * @param int   $parent_id The current parent ID being processed (0 for top-level).
+     * @param array $ctx       Contextual data containing maps, active filters, and states.
      */
     private function render_branch($by_parent, $parent_id, $ctx)
     {
@@ -5209,7 +5213,10 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
             }
             echo '</div>';
 
-            $this->render_attribute_filters($term, $link, $is_current, $ctx);
+            // Only render attribute filters for subcategories (where parent_id is not 0).
+            if ( $parent_id !== 0 ) {
+                $this->render_attribute_filters($term, $link, $is_current, $ctx);
+            }
 
             if ($has_children) {
                 echo '<div class="silvertell-cat-children"><ul class="silvertell-cat-subtree">';

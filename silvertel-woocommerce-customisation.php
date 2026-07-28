@@ -4092,10 +4092,22 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-attr-option.is-active::before {
-                content: "\2713";
-                display: inline-block;
-                width: 14px;
-                color: var(--e-global-color-primary, #1d1d1d);
+                flex: 0 0 auto;
+                width: 15px;
+                height: 15px;
+                border-radius: 50%;
+                border: 1px solid #b7bcc2;
+                background: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #fff;
+                font-size: 9px;
+            }
+
+            .silvertell-attr-option.is-active::before {
+                background: #1d1d1d;
+                border-color: #1d1d1d;
             }
 
             .silvertell-attr-count {

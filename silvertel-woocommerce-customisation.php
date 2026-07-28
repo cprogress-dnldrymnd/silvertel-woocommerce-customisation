@@ -3903,7 +3903,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-subtree.silvertell-cat-subtree.silvertell-cat-subtree {
-                margin: 8px 0 4px 40px;
+                margin: 8px 0 4px 20px;
                 /* Increased from 27px for deeper subcategory indent */
             }
 
@@ -4026,7 +4026,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-filters {
-                margin: 6px 0 0 40px;
+                margin: 6px 0 0 20px;
             }
 
             .silvertell-attr-group {
@@ -4076,10 +4076,12 @@ class Silvertell_Woocommerce_Customisation
                 padding: 2px 0;
             }
 
-            .silvertell-attr-option {
+            .silvertell-attr-option.silvertell-attr-option.silvertell-attr-option {
                 font-size: 12px;
-                color: #50575e;
+                color: #50575D;
                 text-decoration: none;
+                display: flex;
+                gap: 10px;
             }
 
             .silvertell-attr-option:hover {

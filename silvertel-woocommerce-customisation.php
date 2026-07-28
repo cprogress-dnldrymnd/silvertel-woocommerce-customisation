@@ -3895,7 +3895,7 @@ class Silvertell_Woocommerce_Customisation
             /* Native sidebar widget: product_cat tree with nested attribute filters
                (Silvertell_Category_Attribute_Widget). Server-rendered, no JS —
                subcategory collapse is a hidden checkbox + label pair (CSS-only). */
-            .silvertell-cat-tree,
+           .silvertell-cat-tree,
             .silvertell-cat-subtree {
                 list-style: none;
                 margin: 0;
@@ -3903,7 +3903,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-subtree {
-                margin: 8px 0 4px 27px;
+                margin: 8px 0 4px 40px; /* Increased from 27px for deeper subcategory indent */
             }
 
             .silvertell-cat-item {
@@ -4002,7 +4002,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-filters {
-                margin: 6px 0 0 25px;
+                margin: 6px 0 0 40px; /* Aligned with the new deeper subcategory indent */
             }
 
             .silvertell-attr-group {
@@ -4010,26 +4010,33 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-attr-summary {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
                 font-size: 12px;
                 font-weight: 600;
                 color: #50575e;
                 cursor: pointer;
+                list-style: none; /* Hides the native solid arrow in modern browsers */
             }
 
+            /* Fallback to hide the native solid arrow in older WebKit browsers */
             .silvertell-attr-summary::-webkit-details-marker {
                 display: none;
             }
 
-            .silvertell-attr-summary::before {
+            /* Moved to ::after to push the indicator to the right, matching category toggles */
+            .silvertell-attr-summary::after {
                 content: "+";
                 display: inline-block;
-                width: 12px;
+                color: #787c82;
+                font-size: 15px;
+                font-weight: 400;
             }
 
-            .silvertell-attr-group[open]>.silvertell-attr-summary::before {
+            .silvertell-attr-group[open]>.silvertell-attr-summary::after {
                 content: "\2212";
             }
-
             .silvertell-attr-options {
                 list-style: none;
                 margin: 2px 0 0 12px;

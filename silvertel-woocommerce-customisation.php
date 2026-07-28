@@ -4091,7 +4091,8 @@ class Silvertell_Woocommerce_Customisation
                 color: var(--e-global-color-primary, #1d1d1d);
             }
 
-            .silvertell-attr-option.is-active::before {
+            .silvertell-attr-option::before {
+                content: "\2713";
                 flex: 0 0 auto;
                 width: 15px;
                 height: 15px;

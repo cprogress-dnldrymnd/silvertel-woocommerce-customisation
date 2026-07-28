@@ -3948,7 +3948,9 @@ class Silvertell_Woocommerce_Customisation
                 background: #1d1d1d;
                 border-color: #1d1d1d;
             }
-
+            .silvertell-cat-item.is-current .silvertell-cat-marker:before {
+                content:'✓';
+            }
             .silvertell-cat-item.is-current .silvertell-cat-name {
                 font-weight: 600;
             }

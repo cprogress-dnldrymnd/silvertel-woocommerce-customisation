@@ -3902,7 +3902,7 @@ class Silvertell_Woocommerce_Customisation
                 padding: 0;
             }
 
-            .silvertell-cat-subtree {
+            .silvertell-cat-subtree.silvertell-cat-subtree.silvertell-cat-subtree {
                 margin: 8px 0 4px 40px; /* Increased from 27px for deeper subcategory indent */
             }
 

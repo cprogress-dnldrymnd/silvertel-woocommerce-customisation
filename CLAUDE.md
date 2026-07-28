@@ -198,13 +198,27 @@ The major subsystems:
   than once for a duplicated layout), each instance is independent, self-contained PHP —
   no DOM-scraping, no JS coordination.
     - `widget()` fetches all `product_cat` terms in one `get_terms()` call, buckets them by
-      `parent` into a tree, and `render_branch()` recurses through it emitting plain
-      `<a href="get_term_link()">` category links (real navigation — no checkboxes/AJAX)
-      nested in `<ul class="silvertell-cat-tree">` / `.silvertell-cat-subtree`.
+      `parent` into a tree, sorts each sibling group by the WooCommerce drag-and-drop
+      category order (`get_term_meta($id, 'order', true)`, set via Products → Categories),
+      then `render_branch()` recurses through it emitting plain `<a href="get_term_link()">`
+      category links (real navigation — no checkboxes/AJAX) nested in
+      `<ul class="silvertell-cat-tree">` / `.silvertell-cat-subtree`. Only top-level
+      categories are visible on load — a category with children gets a CSS-only `+`/`−`
+      toggle (a visually-hidden-but-focusable checkbox + `<label>` pair, `.silvertell-cat-toggle-input`
+      / `.silvertell-cat-children`, no JS) that reveals its subtree, auto-checked for every
+      ancestor of the category currently being viewed. The widget's **Title** field also
+      has a "hide these top-level categories" checkbox list (`$instance['hidden_cats']`) —
+      `render_branch()` skips a hidden term before recursing, which drops its whole branch
+      for free. Checkbox/label `id`/`for` pairs are prefixed with `$this->id . '-r' .
+      self::$render_count` (a static counter incremented per render, not per instance) so
+      two renders of the same widget instance on one page (e.g. a duplicated sidebar layout)
+      never collide on DOM IDs.
     - `render_attribute_filters()` grafts each category's attribute groups on via native
       `<details>`/`<summary>` (`.silvertell-attr-group`) — **zero JS needed** for
       expand/collapse; it's a standard, keyboard- and screen-reader-accessible HTML5
       disclosure element, opened by default only for the category currently being viewed.
+      This block renders as a sibling of the (collapsible) subtree, so it stays visible even
+      while subcategories are collapsed.
     - `get_category_attribute_map()` builds `[ term_id => [ pa_x => ['label', 'terms'] ] ]`
       once per 12h in the `silvertell_cat_attr_map` transient (a full-catalogue walk),
       flushed by `flush_category_attribute_map()` on product save/delete, term edit/delete,

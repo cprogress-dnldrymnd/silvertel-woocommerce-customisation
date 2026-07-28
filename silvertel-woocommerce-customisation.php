@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.47.0
+ * Version: 2.48.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3893,7 +3893,8 @@ class Silvertell_Woocommerce_Customisation
             }
 
             /* Native sidebar widget: product_cat tree with nested attribute filters
-               (Silvertell_Category_Attribute_Widget). Server-rendered, no JS. */
+               (Silvertell_Category_Attribute_Widget). Server-rendered, no JS —
+               subcategory collapse is a hidden checkbox + label pair (CSS-only). */
             .silvertell-cat-tree,
             .silvertell-cat-subtree {
                 list-style: none;
@@ -3902,34 +3903,106 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-subtree {
-                margin: 4px 0 10px 14px;
+                margin: 8px 0 4px 27px;
             }
 
             .silvertell-cat-item {
-                margin: 0 0 6px;
+                margin: 0 0 12px;
             }
 
-            .silvertell-cat-item>a {
+            .silvertell-cat-subtree>.silvertell-cat-item {
+                margin: 0 0 10px;
+            }
+
+            .silvertell-cat-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }
+
+            .silvertell-cat-link {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex: 1 1 auto;
+                min-width: 0;
                 color: #1d1d1d;
                 text-decoration: none;
             }
 
-            .silvertell-cat-item>a:hover {
+            .silvertell-cat-link:hover {
                 text-decoration: underline;
             }
 
-            .silvertell-cat-item.is-current>a {
-                font-weight: 700;
-                color: var(--e-global-color-primary, #1d1d1d);
+            .silvertell-cat-marker {
+                flex: 0 0 auto;
+                width: 15px;
+                height: 15px;
+                border-radius: 50%;
+                border: 1px solid #b7bcc2;
+                background: #fff;
             }
 
-            .silvertell-cat-count {
-                color: #8c8f94;
-                font-weight: 400;
+            .silvertell-cat-item.is-current .silvertell-cat-marker {
+                background: #1d1d1d;
+                border-color: #1d1d1d;
+            }
+
+            .silvertell-cat-item.is-current .silvertell-cat-name {
+                font-weight: 600;
+            }
+
+            /* The toggle checkbox is visually hidden but stays in the tab order and
+               focusable — screen-reader/keyboard users still reach the label via Tab. */
+            .silvertell-cat-toggle-input {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                margin: -1px;
+                padding: 0;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+            }
+
+            .silvertell-cat-toggle {
+                flex: 0 0 auto;
+                width: 20px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 15px;
+                line-height: 1;
+                color: #787c82;
+                cursor: pointer;
+            }
+
+            .silvertell-cat-toggle::before {
+                content: "+";
+            }
+
+            .silvertell-cat-toggle-input:checked~.silvertell-cat-row .silvertell-cat-toggle::before {
+                content: "\2212";
+            }
+
+            .silvertell-cat-toggle-input:focus-visible~.silvertell-cat-row .silvertell-cat-toggle {
+                outline: 2px solid #1d1d1d;
+                outline-offset: 1px;
+            }
+
+            .silvertell-cat-children {
+                display: none;
+            }
+
+            .silvertell-cat-toggle-input:checked~.silvertell-cat-children {
+                display: block;
             }
 
             .silvertell-cat-filters {
-                margin: 4px 0 4px 4px;
+                margin: 6px 0 0 25px;
             }
 
             .silvertell-attr-group {
@@ -4969,6 +5042,14 @@ Silvertell_Woocommerce_Customisation::instance();
  */
 class Silvertell_Category_Attribute_Widget extends WP_Widget
 {
+    /**
+     * Disambiguates checkbox/label IDs if this same widget instance gets displayed
+     * more than once in one page load (e.g. a desktop sidebar and a mobile drawer
+     * both pulling the "shop-sidebar" widget area) — incremented per render, not
+     * per instance, so two renders of the same instance never share IDs.
+     */
+    private static $render_count = 0;
+
     public function __construct()
     {
         parent::__construct(
@@ -4983,7 +5064,11 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
 
     public function form($instance)
     {
-        $title = isset($instance['title']) ? $instance['title'] : __('Product Categories', 'silvertell-wc-customisation');
+        $title       = isset($instance['title']) ? $instance['title'] : __('Product Categories', 'silvertell-wc-customisation');
+        $hidden_cats = array_map('intval', (array) ($instance['hidden_cats'] ?? []));
+
+        $top_level = get_terms(['taxonomy' => 'product_cat', 'parent' => 0, 'hide_empty' => false]);
+        if (is_wp_error($top_level)) $top_level = [];
     ?>
         <p>
             <label for="<?php echo esc_attr($this->get_field_id('title')); ?>"><?php esc_html_e('Title:', 'silvertell-wc-customisation'); ?></label>
@@ -4991,12 +5076,29 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
                 name="<?php echo esc_attr($this->get_field_name('title')); ?>" type="text"
                 value="<?php echo esc_attr($title); ?>">
         </p>
+        <p>
+            <label><?php esc_html_e('Hide these top-level categories (also hides their subcategories):', 'silvertell-wc-customisation'); ?></label>
+            <span style="display:block;max-height:160px;overflow:auto;border:1px solid #ddd;padding:6px;background:#fff;">
+                <?php foreach ($top_level as $term) : ?>
+                    <label style="display:block;font-weight:normal;">
+                        <input type="checkbox"
+                            name="<?php echo esc_attr($this->get_field_name('hidden_cats')); ?>[]"
+                            value="<?php echo esc_attr($term->term_id); ?>"
+                            <?php checked(in_array((int) $term->term_id, $hidden_cats, true)); ?>>
+                        <?php echo esc_html($term->name); ?>
+                    </label>
+                <?php endforeach; ?>
+            </span>
+        </p>
     <?php
     }
 
     public function update($new_instance, $old_instance)
     {
-        return ['title' => sanitize_text_field($new_instance['title'] ?? '')];
+        return [
+            'title'       => sanitize_text_field($new_instance['title'] ?? ''),
+            'hidden_cats' => array_values(array_filter(array_map('absint', (array) ($new_instance['hidden_cats'] ?? [])))),
+        ];
     }
 
     public function widget($args, $instance)
@@ -5014,17 +5116,43 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
             if ($queried instanceof WP_Term) $queried_term_id = (int) $queried->term_id;
         }
 
-        // Flat fetch, bucketed by parent — one query, O(n) tree build.
+        // Auto-expand only the branch the visitor is currently inside: the queried
+        // category itself, plus every ancestor of it (so a grandchild page opens
+        // both the top-level and mid-level toggles above it).
+        $expanded_ids = [$queried_term_id => true];
+        if ($queried_term_id) {
+            foreach (get_ancestors($queried_term_id, 'product_cat', 'taxonomy') as $ancestor_id) {
+                $expanded_ids[$ancestor_id] = true;
+            }
+        }
+
+        $hidden_cats = array_flip(array_map('intval', (array) ($instance['hidden_cats'] ?? [])));
+
+        // Flat fetch, bucketed by parent, ordered by the WooCommerce drag-and-drop
+        // category order (term meta 'order'), name as tiebreaker — one query, O(n) build.
         $by_parent = [];
         foreach ($terms as $term) {
             $by_parent[$term->parent][] = $term;
         }
         foreach ($by_parent as &$list) {
             usort($list, function ($a, $b) {
+                $order_a = (int) get_term_meta($a->term_id, 'order', true);
+                $order_b = (int) get_term_meta($b->term_id, 'order', true);
+                if ($order_a !== $order_b) return $order_a <=> $order_b;
                 return strnatcasecmp($a->name, $b->name);
             });
         }
         unset($list);
+
+        $ctx = [
+            'map'            => $map,
+            'active_filters' => $active_filters,
+            'queried_id'     => $queried_term_id,
+            'expanded_ids'   => $expanded_ids,
+            'hidden_cats'    => $hidden_cats,
+            'plugin'         => $plugin,
+            'uid'            => $this->id . '-r' . (++self::$render_count),
+        ];
 
         echo $args['before_widget'];
 
@@ -5034,36 +5162,59 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
         }
 
         echo '<ul class="silvertell-cat-tree">';
-        $this->render_branch($by_parent, 0, $map, $active_filters, $queried_term_id, $plugin);
+        $this->render_branch($by_parent, 0, $ctx);
         echo '</ul>';
 
         echo $args['after_widget'];
     }
 
     /**
-     * Recursively render one level of the category tree as <li> items, each carrying
-     * its own attribute-filter block, then its children as a nested <ul>.
+     * Recursively render one level of the category tree. Only top-level categories
+     * are visible on load — a category with children gets a CSS-only +/- toggle
+     * (a hidden checkbox + label, no JS) that reveals its subtree, auto-checked when
+     * the visitor is browsing inside that branch. Attribute filters render as a
+     * sibling of the (collapsible) subtree, so they stay visible even collapsed.
      */
-    private function render_branch($by_parent, $parent_id, $map, $active_filters, $queried_term_id, $plugin)
+    private function render_branch($by_parent, $parent_id, $ctx)
     {
         if (empty($by_parent[$parent_id])) return;
 
         foreach ($by_parent[$parent_id] as $term) {
+            if (isset($ctx['hidden_cats'][$term->term_id])) continue;
+
             $link = get_term_link($term);
             if (is_wp_error($link)) continue;
 
-            $is_current = ((int) $term->term_id === $queried_term_id);
+            $term_id      = (int) $term->term_id;
+            $is_current   = ($term_id === $ctx['queried_id']);
+            $has_children = ! empty($by_parent[$term_id]);
+            $is_expanded  = $is_current || isset($ctx['expanded_ids'][$term_id]);
+            $toggle_id    = $ctx['uid'] . '-' . $term_id;
 
-            echo '<li class="silvertell-cat-item' . ($is_current ? ' is-current' : '') . '">';
-            echo '<a href="' . esc_url($link) . '"' . ($is_current ? ' aria-current="page"' : '') . '>'
-                . esc_html($term->name) . ' <span class="silvertell-cat-count">(' . (int) $term->count . ')</span></a>';
+            echo '<li class="silvertell-cat-item' . ($is_current ? ' is-current' : '') . ($has_children ? ' has-children' : '') . '">';
 
-            $this->render_attribute_filters($term, $link, $map, $active_filters, $is_current, $plugin);
+            if ($has_children) {
+                echo '<input type="checkbox" class="silvertell-cat-toggle-input" id="' . esc_attr($toggle_id) . '"' . ($is_expanded ? ' checked' : '') . '>';
+            }
 
-            if (! empty($by_parent[$term->term_id])) {
-                echo '<ul class="silvertell-cat-subtree">';
-                $this->render_branch($by_parent, $term->term_id, $map, $active_filters, $queried_term_id, $plugin);
-                echo '</ul>';
+            echo '<div class="silvertell-cat-row">';
+            echo '<a class="silvertell-cat-link" href="' . esc_url($link) . '"' . ($is_current ? ' aria-current="page"' : '') . '>'
+                . '<span class="silvertell-cat-marker"></span>'
+                . '<span class="silvertell-cat-name">' . esc_html($term->name) . '</span>'
+                . '</a>';
+            if ($has_children) {
+                echo '<label class="silvertell-cat-toggle" for="' . esc_attr($toggle_id) . '">'
+                    . '<span class="screen-reader-text">' . esc_html__('Toggle subcategories', 'silvertell-wc-customisation') . '</span>'
+                    . '</label>';
+            }
+            echo '</div>';
+
+            $this->render_attribute_filters($term, $link, $is_current, $ctx);
+
+            if ($has_children) {
+                echo '<div class="silvertell-cat-children"><ul class="silvertell-cat-subtree">';
+                $this->render_branch($by_parent, $term_id, $ctx);
+                echo '</ul></div>';
             }
 
             echo '</li>';
@@ -5077,14 +5228,17 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
      * currently being viewed. Same toggle/active/clear-link logic the old JSON
      * payload builder used, just emitted as HTML directly instead of JS-consumed JSON.
      */
-    private function render_attribute_filters($term, $archive_url, $map, $active_filters, $is_current, $plugin)
+    private function render_attribute_filters($term, $archive_url, $is_current, $ctx)
     {
         $cat_id = (int) $term->term_id;
-        if (empty($map[$cat_id])) return;
+        if (empty($ctx['map'][$cat_id])) return;
+
+        $plugin         = $ctx['plugin'];
+        $active_filters = $ctx['active_filters'];
 
         echo '<div class="silvertell-cat-filters">';
 
-        foreach ($map[$cat_id] as $tax => $data) {
+        foreach ($ctx['map'][$cat_id] as $tax => $data) {
             if (empty($data['terms'])) continue;
 
             echo '<details class="silvertell-attr-group"' . ($is_current ? ' open' : '') . '>';

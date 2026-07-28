@@ -4060,10 +4060,11 @@ class Silvertell_Woocommerce_Customisation
                 content: "\2212";
             }
 
-            .silvertell-attr-options {
+            .silvertell-attr-options.silvertell-attr-options.silvertell-attr-options {
                 list-style: none;
                 margin: 2px 0 0 12px;
                 padding: 0;
+
             }
 
             /* Trigger animation when the native <details> tag opens */

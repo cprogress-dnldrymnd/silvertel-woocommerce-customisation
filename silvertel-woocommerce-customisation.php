@@ -5316,9 +5316,9 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
                     $href = $plugin->build_filtered_archive_url($archive_url, [$tax => [$slug]]);
                 }
 
-                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '">'
+                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '"><span>'
                     . esc_html($term_data['name'])
-                    . ' <span class="silvertell-attr-count">(' . (int) $term_data['count'] . ')</span></a></li>';
+                    . ' <span class="silvertell-attr-count">(' . (int) $term_data['count'] . ')</span></span></a></li>';
             }
 
             echo '</ul></details>';

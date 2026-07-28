@@ -3895,7 +3895,7 @@ class Silvertell_Woocommerce_Customisation
             /* Native sidebar widget: product_cat tree with nested attribute filters
                (Silvertell_Category_Attribute_Widget). Server-rendered, no JS —
                subcategory collapse is a hidden checkbox + label pair (CSS-only). */
-           .silvertell-cat-tree,
+            .silvertell-cat-tree,
             .silvertell-cat-subtree {
                 list-style: none;
                 margin: 0;
@@ -3903,7 +3903,8 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-subtree.silvertell-cat-subtree.silvertell-cat-subtree {
-                margin: 8px 0 4px 40px; /* Increased from 27px for deeper subcategory indent */
+                margin: 8px 0 4px 40px;
+                /* Increased from 27px for deeper subcategory indent */
             }
 
             .silvertell-cat-item {
@@ -3942,15 +3943,22 @@ class Silvertell_Woocommerce_Customisation
                 border-radius: 50%;
                 border: 1px solid #b7bcc2;
                 background: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #fff;
+                font-size: 9px;
             }
 
             .silvertell-cat-item.is-current .silvertell-cat-marker {
                 background: #1d1d1d;
                 border-color: #1d1d1d;
             }
+
             .silvertell-cat-item.is-current .silvertell-cat-marker:before {
-                content:'✓';
+                  content: "\2713";
             }
+
             .silvertell-cat-item.is-current .silvertell-cat-name {
                 font-weight: 600;
             }
@@ -3995,12 +4003,13 @@ class Silvertell_Woocommerce_Customisation
                 outline-offset: 1px;
             }
 
-           /* --- Dropdown Animation --- */
+            /* --- Dropdown Animation --- */
             @keyframes silvertell-dropdown-reveal {
                 from {
                     opacity: 0;
                     transform: translateY(-8px);
                 }
+
                 to {
                     opacity: 1;
                     transform: translateY(0);
@@ -4366,9 +4375,8 @@ class Silvertell_Woocommerce_Customisation
                     else document.addEventListener('DOMContentLoaded', start);
                 })();
             </script>
-            <?php
+        <?php
         }
-
     }
 
     private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null, $post_id = null)
@@ -5046,7 +5054,7 @@ class Silvertell_Woocommerce_Customisation
                 });
             });
         </script>
-<?php
+    <?php
     }
 }
 
@@ -5116,7 +5124,7 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
                 <?php endforeach; ?>
             </span>
         </p>
-    <?php
+<?php
     }
 
     public function update($new_instance, $old_instance)
@@ -5240,7 +5248,7 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
             echo '</div>';
 
             // Only render attribute filters for subcategories (where parent_id is not 0).
-            if ( $parent_id !== 0 ) {
+            if ($parent_id !== 0) {
                 $this->render_attribute_filters($term, $link, $is_current, $ctx);
             }
 
@@ -5293,7 +5301,7 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
                     $href = $plugin->build_filtered_archive_url($archive_url, [$tax => [$slug]]);
                 }
 
-                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '">'
+                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '"><span class="silvertell-cat-marker"></span>'
                     . esc_html($term_data['name'])
                     . ' <span class="silvertell-attr-count">(' . (int) $term_data['count'] . ')</span></a></li>';
             }

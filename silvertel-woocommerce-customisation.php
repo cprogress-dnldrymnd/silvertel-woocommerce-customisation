@@ -3993,16 +3993,29 @@ class Silvertell_Woocommerce_Customisation
                 outline-offset: 1px;
             }
 
+           /* --- Dropdown Animation --- */
+            @keyframes silvertell-dropdown-reveal {
+                from {
+                    opacity: 0;
+                    transform: translateY(-8px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
             .silvertell-cat-children {
                 display: none;
             }
 
             .silvertell-cat-toggle-input:checked~.silvertell-cat-children {
                 display: block;
+                animation: silvertell-dropdown-reveal 0.25s ease-out forwards;
             }
 
             .silvertell-cat-filters {
-                margin: 6px 0 0 40px; /* Aligned with the new deeper subcategory indent */
+                margin: 6px 0 0 40px;
             }
 
             .silvertell-attr-group {
@@ -4017,15 +4030,13 @@ class Silvertell_Woocommerce_Customisation
                 font-weight: 600;
                 color: #50575e;
                 cursor: pointer;
-                list-style: none; /* Hides the native solid arrow in modern browsers */
+                list-style: none;
             }
 
-            /* Fallback to hide the native solid arrow in older WebKit browsers */
             .silvertell-attr-summary::-webkit-details-marker {
                 display: none;
             }
 
-            /* Moved to ::after to push the indicator to the right, matching category toggles */
             .silvertell-attr-summary::after {
                 content: "+";
                 display: inline-block;
@@ -4037,10 +4048,16 @@ class Silvertell_Woocommerce_Customisation
             .silvertell-attr-group[open]>.silvertell-attr-summary::after {
                 content: "\2212";
             }
+
             .silvertell-attr-options {
                 list-style: none;
                 margin: 2px 0 0 12px;
                 padding: 0;
+            }
+
+            /* Trigger animation when the native <details> tag opens */
+            .silvertell-attr-group[open]>.silvertell-attr-options {
+                animation: silvertell-dropdown-reveal 0.25s ease-out forwards;
             }
 
             .silvertell-attr-options li {

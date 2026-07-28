@@ -183,11 +183,28 @@ The major subsystems:
       handler) for the race window before a rewrite pass catches a freshly-injected link;
       modified clicks (open-in-new-tab, etc.) fall through to the rewritten href.
 
-- **Sidebar category-attribute filters** (`inject_frontend_assets`, gated on `is_shop() ||
-  is_product_category()`): nests global product-attribute filters (e.g. Output Voltage,
-  Power) under each subcategory in the same Elementor "Product Categories" sidebar widget
-  — no server-side hook into that widget exists, so this injects client-side, reusing the
-  filter_cat rewrite's `MutationObserver`/capture-phase-click pattern above.
+- **Sidebar category + attribute filter widget** (`Silvertell_Category_Attribute_Widget`,
+  a top-level `extends WP_Widget` class declared near the bottom of the file, registered
+  via `add_action('widgets_init', ...)` in `register_hooks()`): a native widget meant to
+  **replace** the theme/companion-plugin's third-party "Product Categories" widget
+  (`widget_klb_product_categories`) in the *Shop Sidebar* widget area (`register_sidebar('shop-sidebar')`,
+  defined in the theme). An earlier version of this feature tried to inject nested
+  attribute filters into that third-party widget's rendered markup via client-side JS
+  (`MutationObserver` + href-scraping) — abandoned because its markup turned out to be
+  duplicated elsewhere on the live page (a mobile "Filter Products" drawer, possibly a
+  lazy-loaded Elementor mega-menu dropdown), and scanning the whole document for candidate
+  links kept attaching stray duplicate blocks to those copies. A native widget sidesteps
+  this entirely: wherever WordPress renders the `shop-sidebar` widget area (once, or more
+  than once for a duplicated layout), each instance is independent, self-contained PHP —
+  no DOM-scraping, no JS coordination.
+    - `widget()` fetches all `product_cat` terms in one `get_terms()` call, buckets them by
+      `parent` into a tree, and `render_branch()` recurses through it emitting plain
+      `<a href="get_term_link()">` category links (real navigation — no checkboxes/AJAX)
+      nested in `<ul class="silvertell-cat-tree">` / `.silvertell-cat-subtree`.
+    - `render_attribute_filters()` grafts each category's attribute groups on via native
+      `<details>`/`<summary>` (`.silvertell-attr-group`) — **zero JS needed** for
+      expand/collapse; it's a standard, keyboard- and screen-reader-accessible HTML5
+      disclosure element, opened by default only for the category currently being viewed.
     - `get_category_attribute_map()` builds `[ term_id => [ pa_x => ['label', 'terms'] ] ]`
       once per 12h in the `silvertell_cat_attr_map` transient (a full-catalogue walk),
       flushed by `flush_category_attribute_map()` on product save/delete, term edit/delete,
@@ -202,12 +219,15 @@ The major subsystems:
       matching terms to objects, maps each back up to its top-level ancestor
       (`get_root_product_id`), and intersects across attributes (OR within one attribute,
       AND across attributes).
-    - `build_category_attribute_sidebar_payload()` pre-computes every value's href in PHP:
-      toggling the term in/out of the current filter set for the category being viewed, or a
-      fresh single-value filter for every other category. The injected DOM per category is
-      `.dd-cat-attrs` → `.dd-cat-attr` (name always visible via a `+`/`-` toggle, values
-      collapsed except for the category currently being viewed) → `.dd-attr-opt` links
-      showing a `(count)`.
+    - `build_filtered_archive_url()` (public — the widget calls it directly via
+      `Silvertell_Woocommerce_Customisation::instance()`, the plugin's singleton accessor)
+      computes each value's href: toggling the term in/out of the current filter set for
+      the category being viewed, or a fresh single-value filter for every other category.
+      Same logic for a `.silvertell-attr-clear` "Clear filters" link when any filter is
+      active on the category currently being viewed.
+    - The pre-existing `filter_cat=` link-rewrite block in `inject_frontend_assets` (gated
+      on `is_shop()`) is unrelated and still valid — it rewrites a *different* on-page
+      filter link scheme and isn't touched by any of the above.
 
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
   `top_level_category_links` / `maybe_override_single_product_brand` /

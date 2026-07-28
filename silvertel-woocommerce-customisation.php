@@ -3956,7 +3956,7 @@ class Silvertell_Woocommerce_Customisation
             }
 
             .silvertell-cat-item.is-current .silvertell-cat-marker:before {
-                  content: "\2713";
+                content: "\2713";
             }
 
             .silvertell-cat-item.is-current .silvertell-cat-name {
@@ -5301,7 +5301,7 @@ class Silvertell_Category_Attribute_Widget extends WP_Widget
                     $href = $plugin->build_filtered_archive_url($archive_url, [$tax => [$slug]]);
                 }
 
-                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '"><span class="silvertell-cat-marker"></span>'
+                echo '<li><a href="' . esc_url($href) . '" class="silvertell-attr-option' . ($is_active ? ' is-active' : '') . '">'
                     . esc_html($term_data['name'])
                     . ' <span class="silvertell-attr-count">(' . (int) $term_data['count'] . ')</span></a></li>';
             }

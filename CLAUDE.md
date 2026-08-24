@@ -188,7 +188,10 @@ The major subsystems:
   `is_product()` so the single-product page is untouched:
     - On a category **archive** grid it collapses the list to just the category being
       viewed.
-    - On **any other product grid** (main shop page, custom/Elementor pages) it shows
+    - On the **shop/grid with `?filter_cat=`** including a subcategory, it shows that
+      selected subcategory on cards that belong to it (`selected_subcategory_brand_links`,
+      using the same deepest-term collapse as the query normalizer).
+    - On **any other product grid** (unfiltered shop, custom/Elementor pages) it shows
       the top-level parent category instead, via the shared private helper
       `top_level_category_links($product_id, $fallback)`.
   On the **single product** page, `maybe_override_single_product_brand` swaps out the

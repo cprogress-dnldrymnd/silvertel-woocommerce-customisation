@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.53.0
+ * Version: 2.54.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1579,23 +1579,7 @@ class Silvertell_Woocommerce_Customisation
      */
     private function get_selected_filter_cat_term_ids($query)
     {
-        $ids = [];
-
-        $raw = '';
-        if (isset($_REQUEST['filter_cat'])) {
-            $raw = wp_unslash((string) $_REQUEST['filter_cat']);
-        } elseif (isset($_GET['filter_cat'])) {
-            $raw = wp_unslash((string) $_GET['filter_cat']);
-        }
-
-        if ($raw !== '') {
-            foreach (explode(',', $raw) as $part) {
-                $part = trim($part);
-                if ($part !== '' && ctype_digit($part)) {
-                    $ids[] = (int) $part;
-                }
-            }
-        }
+        $ids = $this->get_active_filter_cat_term_ids_from_request();
 
         if (empty($ids)) {
             $ids = $this->collect_product_cat_term_ids_from_tax_query($query->get('tax_query'));
@@ -3399,8 +3383,11 @@ class Silvertell_Woocommerce_Customisation
      * widgets, which run their own query — hence we can't rely on `in_the_loop()`).
      *
      *   - On a product-category archive: show the category currently being viewed.
-     *   - On any other product grid (main shop page, custom/Elementor pages): show
-     *     the top-level parent category instead of the deepest subcategory.
+     *   - On the shop (or other) grid with a subcategory in ?filter_cat=: show that
+     *     selected subcategory when the product belongs to it (parent+child chips
+     *     collapse to deepest, same as the query normalizer).
+     *   - Otherwise (main shop with no subcat filter, custom pages): show the
+     *     top-level parent category instead of the deepest subcategory.
      *
      * Scoped by the card's post type (`product`) so category term links rendered
      * elsewhere (breadcrumbs, subcategory tiles, non-product content) are untouched.
@@ -3431,8 +3418,102 @@ class Silvertell_Woocommerce_Customisation
             return ['<a href="' . esc_url($url) . '" rel="tag">' . esc_html($term->name) . '</a>'];
         }
 
+        // Shop / Elementor grid with active category filters: prefer selected subcategories.
+        $filter_ids = $this->get_active_filter_cat_term_ids_from_request();
+        if (! empty($filter_ids)) {
+            $deepest = $this->deepest_selected_term_ids($filter_ids);
+            $sub_links = $this->selected_subcategory_brand_links($post_id, $deepest);
+            if (! empty($sub_links)) {
+                return $sub_links;
+            }
+        }
+
         // Everywhere else: show the top-level parent category, not the subcategory.
         return $this->top_level_category_links($post_id, $links);
+    }
+
+    /**
+     * Term IDs from the current request's ?filter_cat=… (Elementor shop filter).
+     *
+     * @return int[]
+     */
+    private function get_active_filter_cat_term_ids_from_request()
+    {
+        $raw = '';
+        if (isset($_REQUEST['filter_cat'])) {
+            $raw = wp_unslash((string) $_REQUEST['filter_cat']);
+        } elseif (isset($_GET['filter_cat'])) {
+            $raw = wp_unslash((string) $_GET['filter_cat']);
+        }
+        if ($raw === '') return [];
+
+        $ids = [];
+        foreach (explode(',', $raw) as $part) {
+            $part = trim($part);
+            if ($part !== '' && ctype_digit($part)) {
+                $ids[] = (int) $part;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Build `.product-brand` anchors for selected filter subcategories the product
+     * belongs to. Returns [] when the active filter has no subcategories (only
+     * top-level) or the product matches none of them — caller falls back to top-level.
+     *
+     * @param int   $product_id
+     * @param int[] $selected_ids Deepest selected filter_cat term IDs.
+     * @return string[]
+     */
+    private function selected_subcategory_brand_links($product_id, array $selected_ids)
+    {
+        if (empty($selected_ids)) return [];
+
+        $matched = [];
+        foreach ($selected_ids as $tid) {
+            $term = get_term((int) $tid, 'product_cat');
+            if (! ($term instanceof WP_Term) || is_wp_error($term)) continue;
+            // Only subcategories — top-level selections keep the existing parent brand.
+            if ((int) $term->parent === 0) continue;
+            if (! $this->product_belongs_to_product_cat($product_id, (int) $term->term_id)) continue;
+            $matched[(int) $term->term_id] = $term;
+        }
+
+        if (empty($matched)) return [];
+
+        $links = [];
+        foreach ($matched as $term) {
+            $url = get_term_link($term);
+            if (is_wp_error($url)) continue;
+            $links[] = '<a href="' . esc_url($url) . '" rel="tag">' . esc_html($term->name) . '</a>';
+        }
+
+        return $links;
+    }
+
+    /**
+     * True when the product is assigned the given product_cat term, or any descendant
+     * of that term (so a PSE filter still labels a product filed only under IEEE802.3af).
+     *
+     * @param int $product_id
+     * @param int $term_id
+     * @return bool
+     */
+    private function product_belongs_to_product_cat($product_id, $term_id)
+    {
+        $terms = get_the_terms($product_id, 'product_cat');
+        if (empty($terms) || is_wp_error($terms)) return false;
+
+        $term_id = (int) $term_id;
+        foreach ($terms as $term) {
+            if ((int) $term->term_id === $term_id) return true;
+            $ancestors = array_map('intval', get_ancestors($term->term_id, 'product_cat'));
+            if (in_array($term_id, $ancestors, true)) return true;
+        }
+
+        return false;
     }
 
     /**

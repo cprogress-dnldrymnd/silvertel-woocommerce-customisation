@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.51.0
+ * Version: 2.52.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -4376,94 +4376,6 @@ class Silvertell_Woocommerce_Customisation
             })(jQuery);
         </script>
         <?php
-        // On the main shop page, Elementor's Products widget links product categories
-        // to an on-page filter (?filter_cat=<term_id>). Rewrite those links to the real
-        // /product-category/<slug>/ archive URL so they navigate like the category-archive
-        // template — no server redirect, and always the base archive (page 1), never a
-        // carried-over /page/N/. Only runs on the shop page.
-        if (function_exists('is_shop') && is_shop()) {
-            $cat_terms = get_terms([
-                'taxonomy'   => 'product_cat',
-                'hide_empty' => false,
-            ]);
-            $cat_links = [];
-            if (! is_wp_error($cat_terms)) {
-                foreach ($cat_terms as $cat_term) {
-                    $link = get_term_link($cat_term);
-                    if (! is_wp_error($link)) {
-                        $cat_links[(string) $cat_term->term_id] = $link;
-                    }
-                }
-            }
-        ?>
-            <script>
-                (function() {
-                    var catLinks = <?php echo wp_json_encode($cat_links); ?>;
-
-                    // Map a filter_cat link's href to its category-archive URL, or null.
-                    // Single category only — multi-category filters (e.g. filter_cat=72,88
-                    // from the .Filter panel) have no single archive, so leave them be.
-                    function archiveFor(href) {
-                        if (!href) return null;
-                        var m = href.match(/[?&]filter_cat=([^&#]+)/);
-                        if (!m) return null;
-                        var val = decodeURIComponent(m[1]);
-                        if (!/^\d+$/.test(val)) return null;
-                        return catLinks[val] || null;
-                    }
-
-                    // Rewrite the visible hrefs so hover / copy-link / open-in-new-tab all
-                    // use the real archive URL. Re-run after Elementor AJAX pagination or
-                    // filtering re-injects links (MutationObserver below).
-                    function rewrite() {
-                        var links = document.querySelectorAll('a[href*="filter_cat="]');
-                        for (var i = 0; i < links.length; i++) {
-                            var target = archiveFor(links[i].getAttribute('href'));
-                            if (target && links[i].getAttribute('href') !== target) {
-                                links[i].setAttribute('href', target);
-                            }
-                        }
-                    }
-
-                    // Intercept plain left-clicks so Elementor's own filter handler can't
-                    // re-apply ?filter_cat via AJAX before a rewrite pass catches the link;
-                    // force a normal navigation to the archive instead. Modified clicks
-                    // (new tab, etc.) fall through to the rewritten href.
-                    document.addEventListener('click', function(e) {
-                        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                        var a = e.target && e.target.closest ? e.target.closest('a[href*="filter_cat="]') : null;
-                        if (!a) return;
-                        var target = archiveFor(a.getAttribute('href'));
-                        if (!target) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        window.location.href = target;
-                    }, true);
-
-                    function start() {
-                        rewrite();
-                        if (window.MutationObserver && document.body) {
-                            var scheduled = false;
-                            new MutationObserver(function() {
-                                if (scheduled) return;
-                                scheduled = true;
-                                setTimeout(function() {
-                                    scheduled = false;
-                                    rewrite();
-                                }, 50);
-                            }).observe(document.body, {
-                                childList: true,
-                                subtree: true
-                            });
-                        }
-                    }
-
-                    if (document.readyState !== 'loading') start();
-                    else document.addEventListener('DOMContentLoaded', start);
-                })();
-            </script>
-        <?php
-        }
     }
 
     private function render_single_file_upload_field($meta_key, $label, $description = '', $html_name = null, $post_id = null)

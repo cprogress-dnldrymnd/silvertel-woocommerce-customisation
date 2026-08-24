@@ -165,24 +165,6 @@ The major subsystems:
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
   font size and padding.
 
-- **Shop-page category link rewrite** (`inject_frontend_assets`, gated on `is_shop()`):
-  Elementor's Products widget links product categories to an on-page filter
-  (`?filter_cat=<term_id>`). An inline script maps every `product_cat` term to its real
-  `get_term_link()` `/product-category/<slug>/` archive URL and rewrites every
-  `a[href*="filter_cat="]` to it — so category clicks navigate to the category archive.
-  It's **client-side only, no redirect**. Details that matter:
-    - Rewrites to the **base archive (page 1)**, never a carried-over `/page/N/` — on shop
-      page N the widget's category links inherit the page number, but a clicked category
-      should land on page 1 of that category (carrying it over can hit an empty page for a
-      category with fewer products).
-    - **Single category only** — multi-category filters (`filter_cat=72,88`, from the
-      `.Filter` panel) have no single archive equivalent and are left untouched.
-    - A **`MutationObserver`** re-applies the rewrite after Elementor's AJAX
-      pagination/filtering re-injects links, and a capture-phase **click interceptor**
-      forces a normal navigation to the archive (blocking Elementor's own AJAX filter
-      handler) for the race window before a rewrite pass catches a freshly-injected link;
-      modified clicks (open-in-new-tab, etc.) fall through to the rewritten href.
-
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
   `top_level_category_links` / `maybe_override_single_product_brand` /
   `render_single_product_parent_brand`): the theme prints a `.product-brand`

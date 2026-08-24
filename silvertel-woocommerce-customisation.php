@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.49.0
+ * Version: 2.50.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -60,9 +60,11 @@ class Silvertell_Woocommerce_Customisation
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
 
-        // Custom Product Support Meta Box
+        // Custom Product Support Meta Box + admin list columns
         add_action('add_meta_boxes', [$this, 'register_product_support_meta_box']);
         add_action('save_post_product-support', [$this, 'save_product_support_meta']);
+        add_filter('manage_product-support_posts_columns', [$this, 'product_support_admin_columns']);
+        add_action('manage_product-support_posts_custom_column', [$this, 'render_product_support_admin_column'], 10, 2);
 
         // Custom Evaluation Board Meta Box
         add_action('add_meta_boxes', [$this, 'register_eb_meta_box']);
@@ -1031,6 +1033,88 @@ class Silvertell_Woocommerce_Customisation
 
         if (isset($_POST['pdf_file'])) {
             update_post_meta($post_id, 'pdf_file', sanitize_text_field(wp_unslash($_POST['pdf_file'])));
+        }
+    }
+
+    /**
+     * Add Categories + PDF File columns on the Product Support list table.
+     *
+     * @param array $columns
+     * @return array
+     */
+    public function product_support_admin_columns($columns)
+    {
+        $new = [];
+        foreach ($columns as $key => $label) {
+            $new[$key] = $label;
+            if ($key === 'title') {
+                $new['ps_categories'] = __('Categories', 'silvertell-wc-customisation');
+                $new['ps_pdf_file'] = __('PDF File', 'silvertell-wc-customisation');
+            }
+        }
+
+        // Fallback if title column is missing (unusual, but keep columns visible).
+        if (!isset($new['ps_categories'])) {
+            $new['ps_categories'] = __('Categories', 'silvertell-wc-customisation');
+        }
+        if (!isset($new['ps_pdf_file'])) {
+            $new['ps_pdf_file'] = __('PDF File', 'silvertell-wc-customisation');
+        }
+
+        return $new;
+    }
+
+    /**
+     * Render Categories / PDF File cells on the Product Support list table.
+     *
+     * @param string $column
+     * @param int    $post_id
+     */
+    public function render_product_support_admin_column($column, $post_id)
+    {
+        if ($column === 'ps_categories') {
+            if (!taxonomy_exists('product-support-category')) {
+                echo '—';
+                return;
+            }
+
+            $terms = get_the_terms($post_id, 'product-support-category');
+            if (empty($terms) || is_wp_error($terms)) {
+                echo '—';
+                return;
+            }
+
+            $links = [];
+            foreach ($terms as $term) {
+                $url = add_query_arg([
+                    'post_type'                 => 'product-support',
+                    'product-support-category'  => $term->slug,
+                ], admin_url('edit.php'));
+                $links[] = '<a href="' . esc_url($url) . '">' . esc_html($term->name) . '</a>';
+            }
+            echo implode(', ', $links);
+            return;
+        }
+
+        if ($column === 'ps_pdf_file') {
+            $file_val = get_post_meta($post_id, 'pdf_file', true);
+            if ($file_val === '' || $file_val === null) {
+                echo '—';
+                return;
+            }
+
+            $url = is_numeric($file_val) ? wp_get_attachment_url((int) $file_val) : $file_val;
+            if (!$url) {
+                echo '<span style="color:#b32d2e;">Missing file #' . esc_html((string) $file_val) . '</span>';
+                return;
+            }
+
+            $label = basename(wp_parse_url($url, PHP_URL_PATH));
+            if ($label === '' || $label === '/') {
+                $label = is_numeric($file_val) ? ('#' . (int) $file_val) : __('View file', 'silvertell-wc-customisation');
+            }
+
+            echo '<a href="' . esc_url($url) . '" target="_blank" rel="noopener noreferrer">' . esc_html(rawurldecode($label)) . '</a>';
         }
     }
 

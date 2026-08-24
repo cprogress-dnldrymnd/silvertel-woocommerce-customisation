@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.48.0
+ * Version: 2.49.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -49,6 +49,12 @@ class Silvertell_Woocommerce_Customisation
         add_action('admin_init', [$this, 'handle_eb_csv_upload']);
         add_action('wp_ajax_silvertell_eb_import_chunk', [$this, 'ajax_import_chunk']);
         add_action('wp_ajax_silvertell_eb_import_hierarchy', [$this, 'ajax_import_hierarchy']);
+
+        // Product Support AJAX Importer Hooks (PDF sideload → pdf_file attachment ID)
+        add_action('admin_menu', [$this, 'add_ps_importer_submenu']);
+        add_action('admin_init', [$this, 'handle_ps_csv_upload']);
+        add_action('wp_ajax_silvertell_ps_import_chunk', [$this, 'ajax_ps_import_chunk']);
+        add_action('wp_ajax_silvertell_ps_import_cleanup', [$this, 'ajax_ps_import_cleanup']);
 
         // Admin Settings
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -549,6 +555,432 @@ class Silvertell_Woocommerce_Customisation
             $upload_dir = wp_upload_dir();
             $filepath = $upload_dir['basedir'] . '/' . $file_name;
             if (file_exists($filepath)) {
+                unlink($filepath);
+                $logs[] = "<span style='color:#7f8c8d;'>Temporary CSV file deleted.</span>";
+            }
+        }
+
+        wp_send_json_success(['logs' => $logs]);
+    }
+
+    // ==============================================================================
+    // AJAX PRODUCT SUPPORT IMPORTER (PDF → pdf_file)
+    // ==============================================================================
+
+    public function add_ps_importer_submenu()
+    {
+        add_submenu_page(
+            'edit.php?post_type=product-support',
+            'Import Product Support',
+            'Import CSV',
+            'manage_woocommerce',
+            'silvertell-ps-importer',
+            [$this, 'render_ps_importer_page']
+        );
+    }
+
+    public function handle_ps_csv_upload()
+    {
+        if (!isset($_POST['silvertell_ps_upload_submit']) || !isset($_FILES['ps_csv_file'])) return;
+        if (!isset($_POST['silvertell_import_ps_nonce']) || !wp_verify_nonce($_POST['silvertell_import_ps_nonce'], 'silvertell_import_ps')) return;
+        if (!current_user_can('manage_woocommerce')) return;
+
+        $file = $_FILES['ps_csv_file'];
+        if (empty($file['tmp_name'])) {
+            wp_die('Error: No file selected or file exceeds maximum server upload size.');
+        }
+
+        $upload_dir = wp_upload_dir();
+        $target_filename = 'ps_import_' . time() . '.csv';
+        $target_path = $upload_dir['basedir'] . '/' . $target_filename;
+
+        if (move_uploaded_file($file['tmp_name'], $target_path)) {
+            $category = isset($_POST['ps_default_category']) ? absint($_POST['ps_default_category']) : 0;
+            $redirect = admin_url('edit.php?post_type=product-support&page=silvertell-ps-importer&step=2&file=' . urlencode($target_filename));
+            if ($category) {
+                $redirect = add_query_arg('category', $category, $redirect);
+            }
+            wp_redirect($redirect);
+            exit;
+        }
+
+        wp_die('Error: Could not move uploaded CSV file to the uploads directory. Check folder permissions.');
+    }
+
+    /**
+     * Build indented options for a hierarchical taxonomy select.
+     *
+     * @param string $taxonomy
+     * @param int    $parent
+     * @param int    $depth
+     * @param int    $selected
+     * @return string
+     */
+    private function render_taxonomy_options($taxonomy, $parent = 0, $depth = 0, $selected = 0)
+    {
+        $terms = get_terms([
+            'taxonomy'   => $taxonomy,
+            'hide_empty' => false,
+            'parent'     => $parent,
+        ]);
+
+        if (is_wp_error($terms) || empty($terms)) {
+            return '';
+        }
+
+        $html = '';
+        foreach ($terms as $term) {
+            $pad = $depth > 0 ? str_repeat('— ', $depth) : '';
+            $html .= sprintf(
+                '<option value="%d"%s>%s%s</option>',
+                (int) $term->term_id,
+                selected($selected, (int) $term->term_id, false),
+                esc_html($pad),
+                esc_html($term->name)
+            );
+            $html .= $this->render_taxonomy_options($taxonomy, (int) $term->term_id, $depth + 1, $selected);
+        }
+
+        return $html;
+    }
+
+    public function render_ps_importer_page()
+    {
+        if (!current_user_can('manage_woocommerce')) return;
+
+        $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
+
+        echo '<div class="wrap dd-panel-wrapper" style="max-width:900px; padding: 20px !important;">';
+        echo '<h1 style="margin-bottom:20px;">Product Support CSV Importer</h1>';
+
+        if ($step === 1) {
+            $taxonomy_exists = taxonomy_exists('product-support-category');
+            $selected_cat = isset($_GET['category']) ? absint($_GET['category']) : 0;
+            ?>
+            <div style="background:#fff; border:1px solid #c3c4c7; padding:20px 25px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04);">
+                <p style="font-size:14px; margin-bottom:16px;">Upload a CSV of documents. Each row creates or updates a <code>product-support</code> post, sideloads the PDF into the media library, and stores the attachment ID in <code>pdf_file</code>.</p>
+
+                <div style="background:#f6f7f7; border-left:4px solid var(--e-global-color-c172edd, #2271b1); padding:12px 16px; margin-bottom:20px; font-size:13px;">
+                    <strong>CSV columns</strong>
+                    <ul style="margin:8px 0 0 18px; list-style:disc;">
+                        <li><code>Name</code> (required) — post title</li>
+                        <li><code>File</code> (required) — remote PDF URL to sideload (<code>PDF</code> or <code>URL</code> also accepted)</li>
+                        <li><code>Categories</code> (optional) — e.g. <code>Application Notes</code> or <code>Parent &gt; Child</code>; overrides the default category below</li>
+                        <li><code>Description</code> (optional) — post content</li>
+                    </ul>
+                </div>
+
+                <form method="post" enctype="multipart/form-data" action="">
+                    <?php wp_nonce_field('silvertell_import_ps', 'silvertell_import_ps_nonce'); ?>
+                    <table class="form-table" role="presentation">
+                        <tbody>
+                            <tr>
+                                <th scope="row"><label for="ps_csv_file" style="font-weight:600;">Choose a CSV file</label></th>
+                                <td>
+                                    <input type="file" id="ps_csv_file" name="ps_csv_file" accept=".csv" required style="border: 1px solid #ccc; padding: 5px; width: 100%; max-width: 400px; background: #fafafa;">
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row"><label for="ps_default_category" style="font-weight:600;">Default category</label></th>
+                                <td>
+                                    <?php if ($taxonomy_exists) : ?>
+                                        <select id="ps_default_category" name="ps_default_category" style="min-width:280px;">
+                                            <option value="0">— None (use Categories column only) —</option>
+                                            <?php echo $this->render_taxonomy_options('product-support-category', 0, 0, $selected_cat); ?>
+                                        </select>
+                                        <p class="description">Applied to every row that does not set a <code>Categories</code> value. Create categories under Product Support → Categories if the list is empty.</p>
+                                    <?php else : ?>
+                                        <p class="description" style="color:#b32d2e;">The <code>product-support-category</code> taxonomy is not registered. Categories cannot be assigned until it exists.</p>
+                                        <input type="hidden" name="ps_default_category" value="0" />
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="submit">
+                        <button type="submit" name="silvertell_ps_upload_submit" class="button button-primary button-hero">Continue to Import</button>
+                    </p>
+                </form>
+            </div>
+            <?php
+        } elseif ($step === 2 && !empty($_GET['file'])) {
+
+            $file_name = sanitize_text_field(wp_unslash($_GET['file']));
+            $default_category = isset($_GET['category']) ? absint($_GET['category']) : 0;
+            $upload_dir = wp_upload_dir();
+            $filepath = $upload_dir['basedir'] . '/' . $file_name;
+
+            if (!file_exists($filepath)) {
+                echo '<div class="notice notice-error"><p>Temporary file not found. Please try uploading again.</p></div>';
+                echo '</div>';
+                return;
+            }
+
+            $handle = fopen($filepath, 'r');
+            $total_rows = 0;
+            if ($handle) {
+                while (fgetcsv($handle) !== false) {
+                    $total_rows++;
+                }
+                fclose($handle);
+            }
+            $data_rows = max(0, $total_rows - 1);
+
+            if ($data_rows === 0) {
+                echo '<div class="notice notice-error"><p>The uploaded CSV appears to be empty or improperly formatted.</p></div>';
+                echo '</div>';
+                return;
+            }
+
+            $category_label = '';
+            if ($default_category && taxonomy_exists('product-support-category')) {
+                $term = get_term($default_category, 'product-support-category');
+                if ($term && !is_wp_error($term)) {
+                    $category_label = $term->name;
+                }
+            }
+            ?>
+            <div style="background:#fff; border:1px solid #c3c4c7; padding:20px 25px; border-radius:4px; box-shadow:0 1px 1px rgba(0,0,0,0.04);">
+                <h2 style="margin-top:0;">Importing documents… Please wait.</h2>
+                <p>Do not close this window until the import is complete.<?php
+                    if ($category_label) {
+                        echo ' Default category: <strong>' . esc_html($category_label) . '</strong>.';
+                    }
+                ?></p>
+
+                <div style="background: #f0f0f1; border-radius: 20px; height: 24px; overflow: hidden; margin: 20px 0; width: 100%; position: relative;">
+                    <div id="dd-ps-progress-fill" style="background: var( --e-global-color-c172edd ); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                    <span id="dd-ps-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 24px; font-size: 12px; color: #fff; font-weight: bold; mix-blend-mode: difference;">0%</span>
+                </div>
+
+                <div id="dd-ps-log-box" style="background: #1d2327; color: #a7aaad; font-family: monospace; font-size: 13px; padding: 15px; height: 350px; overflow-y: auto; border-radius: 4px; text-align: left; line-height: 1.6;">
+                    <div>&gt; Initializing import for <?php echo esc_html((string) $data_rows); ?> rows...</div>
+                </div>
+            </div>
+
+            <script>
+                jQuery(document).ready(function($) {
+                    var currentOffset = 0;
+                    var totalRows = <?php echo (int) $data_rows; ?>;
+                    var fileName = <?php echo wp_json_encode($file_name); ?>;
+                    var defaultCategory = <?php echo (int) $default_category; ?>;
+                    var nonce = <?php echo wp_json_encode(wp_create_nonce('silvertell_ps_ajax_import')); ?>;
+
+                    function scrollToBottom() {
+                        var logBox = document.getElementById('dd-ps-log-box');
+                        logBox.scrollTop = logBox.scrollHeight;
+                    }
+
+                    function appendLogs(logs) {
+                        if (!logs || logs.length === 0) return;
+                        logs.forEach(function(log) {
+                            $('#dd-ps-log-box').append('<div>&gt; ' + log + '</div>');
+                        });
+                        scrollToBottom();
+                    }
+
+                    function runImportChunk() {
+                        $.ajax({
+                            url: ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'silvertell_ps_import_chunk',
+                                file: fileName,
+                                offset: currentOffset,
+                                category: defaultCategory,
+                                _ajax_nonce: nonce
+                            },
+                            success: function(response) {
+                                if (response.success) {
+                                    currentOffset += response.data.processed;
+                                    var percentage = Math.min(100, Math.round((currentOffset / totalRows) * 100));
+
+                                    $('#dd-ps-progress-fill').css('width', percentage + '%');
+                                    $('#dd-ps-progress-text').text(percentage + '%');
+                                    appendLogs(response.data.logs);
+
+                                    if (currentOffset < totalRows && response.data.processed > 0) {
+                                        runImportChunk();
+                                    } else {
+                                        runCleanup();
+                                    }
+                                } else {
+                                    appendLogs(["<span style='color:#e74c3c;'>Fatal Error: " + response.data + "</span>"]);
+                                }
+                            },
+                            error: function() {
+                                appendLogs(["<span style='color:#e74c3c;'>Server Timeout. PDF sideloads may be taking too long — refresh and resume from the same file if needed.</span>"]);
+                            }
+                        });
+                    }
+
+                    function runCleanup() {
+                        $.ajax({
+                            url: ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'silvertell_ps_import_cleanup',
+                                file: fileName,
+                                _ajax_nonce: nonce
+                            },
+                            success: function(res) {
+                                if (res.success) {
+                                    appendLogs(res.data.logs);
+                                    $('#dd-ps-progress-fill').css('background', '#46b450');
+                                    appendLogs(["<span style='color:#46b450; font-weight:bold;'>Import Completed Successfully!</span>"]);
+                                } else {
+                                    appendLogs(["<span style='color:#e74c3c;'>Cleanup Error: " + res.data + "</span>"]);
+                                }
+                            }
+                        });
+                    }
+
+                    setTimeout(runImportChunk, 1000);
+                });
+            </script>
+            <?php
+        }
+        echo '</div>';
+    }
+
+    public function ajax_ps_import_chunk()
+    {
+        check_ajax_referer('silvertell_ps_ajax_import', '_ajax_nonce');
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error('Permission denied.');
+        }
+
+        $file_name = sanitize_text_field(wp_unslash($_POST['file'] ?? ''));
+        $offset = intval($_POST['offset'] ?? 0);
+        $default_category = absint($_POST['category'] ?? 0);
+        $batch_size = 3;
+
+        $upload_dir = wp_upload_dir();
+        $filepath = $upload_dir['basedir'] . '/' . $file_name;
+
+        if (!file_exists($filepath)) {
+            wp_send_json_error('Temporary file missing.');
+        }
+
+        $handle = fopen($filepath, 'r');
+        $headers = fgetcsv($handle, 5000, ',');
+        if (!$headers) {
+            fclose($handle);
+            wp_send_json_error('Could not read CSV headers.');
+        }
+        $headers[0] = trim($headers[0], "\xEF\xBB\xBF");
+        $headers = array_map(static function ($h) {
+            return trim((string) $h);
+        }, $headers);
+
+        for ($i = 0; $i < $offset; $i++) {
+            fgetcsv($handle, 5000, ',');
+        }
+
+        $logs = [];
+        $processed = 0;
+
+        while (($data = fgetcsv($handle, 10000, ',')) !== false) {
+            if ($processed >= $batch_size) break;
+
+            $row = [];
+            foreach ($headers as $index => $key) {
+                $row[$key] = isset($data[$index]) ? trim((string) $data[$index]) : '';
+            }
+
+            $name = $row['Name'] ?? ($row['Title'] ?? '');
+            $file_url = $row['File'] ?? ($row['PDF'] ?? ($row['URL'] ?? ($row['pdf_file'] ?? '')));
+            $categories = $row['Categories'] ?? ($row['Category'] ?? '');
+            $description = $row['Description'] ?? '';
+
+            if ($name === '') {
+                $processed++;
+                $logs[] = "<span style='color:#f1c40f;'>Skipped</span>: empty Name on row " . ($offset + $processed);
+                continue;
+            }
+
+            $existing = get_posts([
+                'post_type'      => 'product-support',
+                'title'          => $name,
+                'post_status'    => 'any',
+                'posts_per_page' => 1,
+                'fields'         => 'ids',
+            ]);
+            $existing_id = !empty($existing) ? (int) $existing[0] : 0;
+
+            $post_data = [
+                'post_title'   => $name,
+                'post_content' => $description,
+                'post_status'  => 'publish',
+                'post_type'    => 'product-support',
+            ];
+
+            if ($existing_id) {
+                $post_data['ID'] = $existing_id;
+                $post_id = wp_update_post($post_data);
+                $action_label = "<span style='color:#72aee6;'>Updated</span>";
+            } else {
+                $post_id = wp_insert_post($post_data);
+                $action_label = "<span style='color:#68de7c;'>Created</span>";
+            }
+
+            if (!$post_id || is_wp_error($post_id)) {
+                $logs[] = "<span style='color:#e74c3c;'>Failed</span>: " . esc_html($name);
+                $processed++;
+                continue;
+            }
+
+            $file_note = '';
+            if ($file_url !== '') {
+                if (filter_var($file_url, FILTER_VALIDATE_URL)) {
+                    $attach_id = $this->sideload_file_to_media_library($file_url, $post_id);
+                    if (!is_wp_error($attach_id)) {
+                        update_post_meta($post_id, 'pdf_file', $attach_id);
+                        $file_note = ' · PDF #' . (int) $attach_id;
+                    } else {
+                        $file_note = " · <span style='color:#e74c3c;'>PDF failed: " . esc_html($attach_id->get_error_message()) . '</span>';
+                    }
+                } elseif (is_numeric($file_url)) {
+                    update_post_meta($post_id, 'pdf_file', absint($file_url));
+                    $file_note = ' · PDF #' . absint($file_url) . ' (existing ID)';
+                } else {
+                    $file_note = " · <span style='color:#f1c40f;'>Invalid File URL</span>";
+                }
+            } else {
+                $file_note = " · <span style='color:#f1c40f;'>No File column</span>";
+            }
+
+            if ($categories !== '') {
+                $this->assign_hierarchical_terms_to_post($post_id, $categories, 'product-support-category');
+            } elseif ($default_category && taxonomy_exists('product-support-category')) {
+                wp_set_object_terms($post_id, [$default_category], 'product-support-category', false);
+            }
+
+            $logs[] = "{$action_label}: " . esc_html($name) . " (ID: {$post_id})" . $file_note;
+            $processed++;
+        }
+
+        fclose($handle);
+
+        wp_send_json_success([
+            'processed' => $processed,
+            'logs'      => $logs,
+        ]);
+    }
+
+    public function ajax_ps_import_cleanup()
+    {
+        check_ajax_referer('silvertell_ps_ajax_import', '_ajax_nonce');
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error('Permission denied.');
+        }
+
+        $logs = [];
+        $file_name = sanitize_text_field(wp_unslash($_POST['file'] ?? ''));
+        if ($file_name !== '') {
+            $upload_dir = wp_upload_dir();
+            $filepath = $upload_dir['basedir'] . '/' . $file_name;
+            if (file_exists($filepath) && strpos(basename($filepath), 'ps_import_') === 0) {
                 unlink($filepath);
                 $logs[] = "<span style='color:#7f8c8d;'>Temporary CSV file deleted.</span>";
             }

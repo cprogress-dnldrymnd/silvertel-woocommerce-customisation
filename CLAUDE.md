@@ -165,6 +165,15 @@ The major subsystems:
   sub-tabs) keep the same underlined-tab style as desktop on mobile, just with smaller
   font size and padding.
 
+- **Hierarchical shop `filter_cat` normalization** (`normalize_filter_cat_tax_query` on
+  `woocommerce_product_query` priority 99, plus `maybe_normalize_filter_cat_pre_get_posts`
+  on `pre_get_posts` for Elementor AJAX product queries): when the shop filter selects
+  multiple `product_cat` terms (e.g. a parent and its child via `?filter_cat=72,88`),
+  Elementor's default AND intersection often returns an empty grid. The normalizer keeps
+  only the deepest selected terms (`deepest_selected_term_ids`), then applies a single
+  `IN` + `include_children` clause so PoE + PSE behaves like PSE (and sibling subcats
+  union with OR). Admin queries are untouched.
+
 - **`.product-brand` override** (`filter_grid_brand_to_current_category` /
   `top_level_category_links` / `maybe_override_single_product_brand` /
   `render_single_product_parent_brand`): the theme prints a `.product-brand`

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.52.0
+ * Version: 2.53.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -115,6 +115,13 @@ class Silvertell_Woocommerce_Customisation
         // Frontend shop/archive: exclude child products from all WooCommerce product
         // listings — they surface only inside their parent's Product Range tab.
         add_action('woocommerce_product_query', [$this, 'hide_child_products_from_shop']);
+
+        // Elementor multi-category filters (?filter_cat=parent,child) often AND every
+        // selected term, which empties the grid when a parent and its child are both
+        // checked. Normalize after Elementor builds the query: keep deepest terms only,
+        // match with IN + include_children (OR among leaves).
+        add_action('woocommerce_product_query', [$this, 'normalize_filter_cat_tax_query'], 99);
+        add_action('pre_get_posts', [$this, 'maybe_normalize_filter_cat_pre_get_posts'], 99);
 
         // Child Products manager on the product edit screen (tree list + add/delete + a
         // popup editor for Title / Content / Categories / SKU / Attributes / Buy Samples).
@@ -1521,6 +1528,215 @@ class Silvertell_Woocommerce_Customisation
     public function hide_child_products_from_shop($query)
     {
         $query->set('post_parent', 0);
+    }
+
+    /**
+     * Narrow pre_get_posts entry for Elementor/AJAX product queries that carry a
+     * multi-category filter but may not fire `woocommerce_product_query`.
+     *
+     * @param WP_Query $query
+     */
+    public function maybe_normalize_filter_cat_pre_get_posts($query)
+    {
+        if (is_admin() && ! wp_doing_ajax()) return;
+
+        $post_type = $query->get('post_type');
+        $is_product = $post_type === 'product'
+            || (is_array($post_type) && in_array('product', $post_type, true));
+        if (! $is_product) return;
+
+        $this->normalize_filter_cat_tax_query($query);
+    }
+
+    /**
+     * When the shop filter selects multiple product_cat terms (e.g. a parent and its
+     * child), rewrite the tax_query so ancestors of other selected terms are dropped
+     * and the remainder match with IN + include_children — avoiding Elementor's AND
+     * intersection that yields an empty grid.
+     *
+     * @param WP_Query $query
+     */
+    public function normalize_filter_cat_tax_query($query)
+    {
+        if (is_admin() && ! wp_doing_ajax()) return;
+        if (! $query instanceof WP_Query) return;
+
+        $term_ids = $this->get_selected_filter_cat_term_ids($query);
+        if (count($term_ids) < 2) return;
+
+        $deepest = $this->deepest_selected_term_ids($term_ids);
+        if (empty($deepest)) return;
+
+        $this->apply_product_cat_in_tax_query($query, $deepest);
+    }
+
+    /**
+     * Collect selected product_cat term IDs from ?filter_cat=… and/or the query's
+     * existing product_cat tax_query clauses.
+     *
+     * @param WP_Query $query
+     * @return int[]
+     */
+    private function get_selected_filter_cat_term_ids($query)
+    {
+        $ids = [];
+
+        $raw = '';
+        if (isset($_REQUEST['filter_cat'])) {
+            $raw = wp_unslash((string) $_REQUEST['filter_cat']);
+        } elseif (isset($_GET['filter_cat'])) {
+            $raw = wp_unslash((string) $_GET['filter_cat']);
+        }
+
+        if ($raw !== '') {
+            foreach (explode(',', $raw) as $part) {
+                $part = trim($part);
+                if ($part !== '' && ctype_digit($part)) {
+                    $ids[] = (int) $part;
+                }
+            }
+        }
+
+        if (empty($ids)) {
+            $ids = $this->collect_product_cat_term_ids_from_tax_query($query->get('tax_query'));
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $ids))));
+    }
+
+    /**
+     * Walk a tax_query (including nested relation groups) and return every product_cat
+     * term ID referenced.
+     *
+     * @param mixed $tax_query
+     * @return int[]
+     */
+    private function collect_product_cat_term_ids_from_tax_query($tax_query)
+    {
+        $ids = [];
+        if (! is_array($tax_query)) return $ids;
+
+        foreach ($tax_query as $key => $clause) {
+            if ($key === 'relation' || ! is_array($clause)) continue;
+
+            if (isset($clause['relation'])) {
+                $ids = array_merge($ids, $this->collect_product_cat_term_ids_from_tax_query($clause));
+                continue;
+            }
+
+            if (($clause['taxonomy'] ?? '') !== 'product_cat') continue;
+            if (empty($clause['terms'])) continue;
+
+            $field = $clause['field'] ?? 'term_id';
+            foreach ((array) $clause['terms'] as $term) {
+                if ($field === 'term_id' || $field === 'id') {
+                    $ids[] = (int) $term;
+                    continue;
+                }
+                $obj = get_term_by($field === 'slug' ? 'slug' : 'name', $term, 'product_cat');
+                if ($obj && ! is_wp_error($obj)) {
+                    $ids[] = (int) $obj->term_id;
+                }
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Drop any selected term that is an ancestor of another selected term, keeping
+     * only the deepest selections (same idea as related_products_subcategory_terms).
+     *
+     * @param int[] $term_ids
+     * @return int[]
+     */
+    private function deepest_selected_term_ids(array $term_ids)
+    {
+        $term_ids = array_values(array_unique(array_map('intval', $term_ids)));
+        if (count($term_ids) < 2) return $term_ids;
+
+        $leaves = [];
+        foreach ($term_ids as $tid) {
+            $is_ancestor = false;
+            foreach ($term_ids as $other) {
+                if ($other === $tid) continue;
+                $ancestors = array_map('intval', get_ancestors($other, 'product_cat'));
+                if (in_array($tid, $ancestors, true)) {
+                    $is_ancestor = true;
+                    break;
+                }
+            }
+            if (! $is_ancestor) $leaves[] = $tid;
+        }
+
+        return ! empty($leaves) ? $leaves : $term_ids;
+    }
+
+    /**
+     * Replace product_cat clauses on the query with a single IN + include_children
+     * clause for the given term IDs; preserve other taxonomy filters.
+     *
+     * @param WP_Query $query
+     * @param int[]    $term_ids
+     */
+    private function apply_product_cat_in_tax_query($query, array $term_ids)
+    {
+        $tax_query = $query->get('tax_query');
+        if (! is_array($tax_query)) $tax_query = [];
+
+        $kept = $this->strip_product_cat_from_tax_query($tax_query);
+
+        $kept[] = [
+            'taxonomy'         => 'product_cat',
+            'field'            => 'term_id',
+            'terms'            => array_values($term_ids),
+            'operator'         => 'IN',
+            'include_children' => true,
+        ];
+
+        if (count(array_filter(array_keys($kept), 'is_int')) > 1) {
+            $kept['relation'] = 'AND';
+        }
+
+        $query->set('tax_query', $kept);
+        $query->set('product_cat', '');
+    }
+
+    /**
+     * Remove product_cat clauses from a tax_query, preserving relation and other taxes.
+     *
+     * @param array $tax_query
+     * @return array
+     */
+    private function strip_product_cat_from_tax_query(array $tax_query)
+    {
+        $kept = [];
+        $relation = isset($tax_query['relation']) ? $tax_query['relation'] : null;
+
+        foreach ($tax_query as $key => $clause) {
+            if ($key === 'relation' || ! is_array($clause)) continue;
+
+            if (isset($clause['relation'])) {
+                $nested = $this->strip_product_cat_from_tax_query($clause);
+                // Drop empty nested groups (only relation left, or nothing).
+                $nested_clauses = array_filter($nested, function ($v, $k) {
+                    return $k !== 'relation' && is_array($v);
+                }, ARRAY_FILTER_USE_BOTH);
+                if (! empty($nested_clauses)) {
+                    $kept[] = $nested;
+                }
+                continue;
+            }
+
+            if (($clause['taxonomy'] ?? '') === 'product_cat') continue;
+            $kept[] = $clause;
+        }
+
+        if ($relation && count($kept) > 1) {
+            $kept['relation'] = $relation;
+        }
+
+        return $kept;
     }
 
     /**

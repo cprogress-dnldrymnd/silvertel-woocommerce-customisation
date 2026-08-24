@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.56.0
+ * Version: 2.57.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -59,6 +59,16 @@ class Silvertell_Woocommerce_Customisation
         // Admin Settings
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
+
+        // Product Categories Tool (tree manager + bulk reassign for top-level products)
+        add_action('admin_menu', [$this, 'add_categories_tool_page']);
+        add_action('wp_ajax_silvertell_cat_tree_create', [$this, 'ajax_cat_tree_create']);
+        add_action('wp_ajax_silvertell_cat_tree_update', [$this, 'ajax_cat_tree_update']);
+        add_action('wp_ajax_silvertell_cat_tree_move', [$this, 'ajax_cat_tree_move']);
+        add_action('wp_ajax_silvertell_cat_tree_reorder', [$this, 'ajax_cat_tree_reorder']);
+        add_action('wp_ajax_silvertell_cat_tree_delete', [$this, 'ajax_cat_tree_delete']);
+        add_action('wp_ajax_silvertell_cat_bulk_query', [$this, 'ajax_cat_bulk_query']);
+        add_action('wp_ajax_silvertell_cat_bulk_apply', [$this, 'ajax_cat_bulk_apply']);
 
         // Custom Product Support Meta Box + admin list columns
         add_action('add_meta_boxes', [$this, 'register_product_support_meta_box']);
@@ -194,7 +204,13 @@ class Silvertell_Woocommerce_Customisation
 
     public function enqueue_core_assets($hook)
     {
-        if (in_array($hook, ['post.php', 'post-new.php', 'edit.php', 'woocommerce_page_silvertell-file-importer'], true)) {
+        if (in_array($hook, [
+            'post.php',
+            'post-new.php',
+            'edit.php',
+            'woocommerce_page_silvertell-file-importer',
+            'woocommerce_page_silvertell-categories-tool',
+        ], true)) {
             wp_enqueue_script('jquery-ui-sortable');
             wp_enqueue_media();
         }
@@ -1301,6 +1317,925 @@ class Silvertell_Woocommerce_Customisation
             </div>
         </div>
     <?php
+    }
+
+    // ==============================================================================
+    // PRODUCT CATEGORIES TOOL (tree manager + bulk reassign)
+    // ==============================================================================
+
+    public function add_categories_tool_page()
+    {
+        add_submenu_page(
+            'woocommerce',
+            __('Product Categories Tool', 'silvertell-wc-customisation'),
+            __('Product Categories Tool', 'silvertell-wc-customisation'),
+            'manage_woocommerce',
+            'silvertell-categories-tool',
+            [$this, 'render_categories_tool_page']
+        );
+    }
+
+    /**
+     * Clear the cached category→attribute map (if present). Term-order changes only
+     * touch term meta, so they do not fire edited_term — call this explicitly after reorder.
+     */
+    public function flush_category_attribute_map()
+    {
+        delete_transient('silvertell_cat_attr_map');
+    }
+
+    private function assert_cat_tool_ajax()
+    {
+        check_ajax_referer('silvertell_cat_tool', 'nonce');
+        if (! current_user_can('manage_woocommerce')) {
+            wp_send_json_error(['message' => __('Permission denied.', 'silvertell-wc-customisation')], 403);
+        }
+    }
+
+    /**
+     * Whether a product_cat term is "Product Range" or a direct child of it
+     * (drives Product Range sub-tabs via get_product_range_subcategory).
+     */
+    private function is_product_range_related_term($term)
+    {
+        if (! $term || is_wp_error($term)) return false;
+        if ($term->name === 'Product Range') return true;
+        if ((int) $term->parent === 0) return false;
+        $parent = get_term((int) $term->parent, 'product_cat');
+        return $parent && ! is_wp_error($parent) && $parent->name === 'Product Range';
+    }
+
+    /**
+     * Build [ parent_id => [ WP_Term, … ] ] for product_cat, siblings sorted by WC order meta.
+     */
+    private function get_product_cat_children_map()
+    {
+        $terms = get_terms([
+            'taxonomy'   => 'product_cat',
+            'hide_empty' => false,
+        ]);
+        $map = [];
+        if (is_wp_error($terms) || empty($terms)) {
+            return $map;
+        }
+        foreach ($terms as $term) {
+            $parent = (int) $term->parent;
+            if (! isset($map[$parent])) {
+                $map[$parent] = [];
+            }
+            $map[$parent][] = $term;
+        }
+        foreach ($map as &$siblings) {
+            usort($siblings, static function ($a, $b) {
+                $oa = (int) get_term_meta($a->term_id, 'order', true);
+                $ob = (int) get_term_meta($b->term_id, 'order', true);
+                if ($oa === $ob) {
+                    return strcasecmp($a->name, $b->name);
+                }
+                return $oa <=> $ob;
+            });
+        }
+        unset($siblings);
+        return $map;
+    }
+
+    private function render_cat_parent_options($children_map, $parent = 0, $depth = 0, $selected = 0, $exclude_ids = [])
+    {
+        if (empty($children_map[$parent])) {
+            return;
+        }
+        foreach ($children_map[$parent] as $term) {
+            if (in_array((int) $term->term_id, $exclude_ids, true)) {
+                continue;
+            }
+            $pad = str_repeat('— ', $depth);
+            printf(
+                '<option value="%d"%s>%s%s</option>',
+                (int) $term->term_id,
+                selected((int) $selected, (int) $term->term_id, false),
+                esc_html($pad . $term->name),
+                ''
+            );
+            $this->render_cat_parent_options($children_map, (int) $term->term_id, $depth + 1, $selected, $exclude_ids);
+        }
+    }
+
+    /**
+     * Collect a term and all descendant term IDs (for move cycle prevention / cascade delete).
+     */
+    private function collect_product_cat_descendant_ids($term_id, $children_map = null)
+    {
+        if ($children_map === null) {
+            $children_map = $this->get_product_cat_children_map();
+        }
+        $ids = [(int) $term_id];
+        if (! empty($children_map[(int) $term_id])) {
+            foreach ($children_map[(int) $term_id] as $child) {
+                $ids = array_merge($ids, $this->collect_product_cat_descendant_ids((int) $child->term_id, $children_map));
+            }
+        }
+        return $ids;
+    }
+
+    public function render_categories_tool_page()
+    {
+        if (! current_user_can('manage_woocommerce')) {
+            return;
+        }
+        $tab = isset($_GET['tab']) ? sanitize_key($_GET['tab']) : 'tree';
+        if (! in_array($tab, ['tree', 'bulk'], true)) {
+            $tab = 'tree';
+        }
+        $base = admin_url('admin.php?page=silvertell-categories-tool');
+        ?>
+        <div class="wrap dd-panel-wrapper silvertell-cat-tool" style="max-width:1100px;">
+            <h1><?php esc_html_e('Product Categories Tool', 'silvertell-wc-customisation'); ?></h1>
+            <nav class="nav-tab-wrapper" style="margin:16px 0 20px;">
+                <a href="<?php echo esc_url(add_query_arg('tab', 'tree', $base)); ?>" class="nav-tab<?php echo $tab === 'tree' ? ' nav-tab-active' : ''; ?>">
+                    <?php esc_html_e('Category Tree', 'silvertell-wc-customisation'); ?>
+                </a>
+                <a href="<?php echo esc_url(add_query_arg('tab', 'bulk', $base)); ?>" class="nav-tab<?php echo $tab === 'bulk' ? ' nav-tab-active' : ''; ?>">
+                    <?php esc_html_e('Bulk Reassign', 'silvertell-wc-customisation'); ?>
+                </a>
+            </nav>
+            <?php
+            if ($tab === 'bulk') {
+                $this->render_bulk_reassign_panel();
+            } else {
+                $this->render_category_tree_panel();
+            }
+            ?>
+        </div>
+        <?php
+    }
+
+    private function render_category_tree_panel()
+    {
+        $children_map = $this->get_product_cat_children_map();
+        $nonce        = wp_create_nonce('silvertell_cat_tool');
+        ?>
+        <p class="description" style="margin-bottom:16px;">
+            <?php esc_html_e('Create, rename, move, reorder, or delete product categories. Drag siblings to change the shop sidebar order. Categories named “Product Range” (and their direct children) label Product Range sub-tabs — edit them carefully.', 'silvertell-wc-customisation'); ?>
+        </p>
+
+        <div class="silvertell-cat-create" style="background:#fff;border:1px solid #c3c4c7;padding:14px 16px;margin-bottom:20px;border-radius:4px;">
+            <h2 style="margin:0 0 12px;font-size:14px;"><?php esc_html_e('Add category', 'silvertell-wc-customisation'); ?></h2>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                <p style="margin:0;">
+                    <label for="silvertell-cat-new-name" style="display:block;font-weight:600;margin-bottom:4px;"><?php esc_html_e('Name', 'silvertell-wc-customisation'); ?></label>
+                    <input type="text" id="silvertell-cat-new-name" class="regular-text" />
+                </p>
+                <p style="margin:0;">
+                    <label for="silvertell-cat-new-parent" style="display:block;font-weight:600;margin-bottom:4px;"><?php esc_html_e('Parent', 'silvertell-wc-customisation'); ?></label>
+                    <select id="silvertell-cat-new-parent">
+                        <option value="0"><?php esc_html_e('— Top level —', 'silvertell-wc-customisation'); ?></option>
+                        <?php $this->render_cat_parent_options($children_map); ?>
+                    </select>
+                </p>
+                <p style="margin:0;">
+                    <button type="button" class="button button-primary" id="silvertell-cat-create-btn"><?php esc_html_e('Add', 'silvertell-wc-customisation'); ?></button>
+                </p>
+            </div>
+            <p id="silvertell-cat-create-msg" class="description" style="margin:8px 0 0;"></p>
+        </div>
+
+        <div id="silvertell-cat-tree-root" class="silvertell-cat-tree-root">
+            <?php $this->render_category_tree_branch($children_map, 0); ?>
+        </div>
+
+        <style>
+            .silvertell-cat-tree-root ul.silvertell-cat-sortable { list-style:none; margin:0; padding:0; }
+            .silvertell-cat-tree-root ul.silvertell-cat-sortable ul { margin-left:22px; padding-left:10px; border-left:1px dashed #dcdcde; }
+            .silvertell-cat-node { background:#fff; border:1px solid #c3c4c7; border-radius:4px; margin:0 0 6px; }
+            .silvertell-cat-node-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; }
+            .silvertell-cat-node .dd-drag-handle { cursor:grab; color:#8c8f94; }
+            .silvertell-cat-node-name { font-weight:600; min-width:120px; flex:1; }
+            .silvertell-cat-node-name input { width:100%; max-width:280px; }
+            .silvertell-cat-node-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+            .silvertell-cat-node.is-product-range { border-color:#dba617; background:#fcf9e8; }
+            .silvertell-cat-badge { font-size:11px; font-weight:600; color:#996800; background:#f0e6b8; padding:1px 6px; border-radius:3px; }
+            .silvertell-cat-count { color:#646970; font-size:12px; }
+        </style>
+        <script>
+        jQuery(function($) {
+            var nonce = <?php echo wp_json_encode($nonce); ?>;
+            var ajaxUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+
+            function msg($el, text, ok) {
+                $el.css('color', ok ? '#00a32a' : '#d63638').text(text || '');
+            }
+
+            function initSortables(ctx) {
+                $(ctx).find('ul.silvertell-cat-sortable').each(function() {
+                    var $ul = $(this);
+                    if ($ul.data('ui-sortable')) {
+                        $ul.sortable('destroy');
+                    }
+                    $ul.sortable({
+                        handle: '.dd-drag-handle',
+                        axis: 'y',
+                        items: '> li.silvertell-cat-li',
+                        update: function() {
+                            var order = $ul.children('li.silvertell-cat-li').map(function() {
+                                return $(this).data('term-id');
+                            }).get();
+                            $.post(ajaxUrl, {
+                                action: 'silvertell_cat_tree_reorder',
+                                nonce: nonce,
+                                order: order
+                            }).done(function(res) {
+                                if (!res || !res.success) {
+                                    alert((res && res.data && res.data.message) || 'Reorder failed');
+                                }
+                            });
+                        }
+                    });
+                });
+            }
+            initSortables(document);
+
+            $('#silvertell-cat-create-btn').on('click', function() {
+                var name = $.trim($('#silvertell-cat-new-name').val());
+                var parent = $('#silvertell-cat-new-parent').val();
+                var $msg = $('#silvertell-cat-create-msg');
+                if (!name) {
+                    msg($msg, '<?php echo esc_js(__('Enter a category name.', 'silvertell-wc-customisation')); ?>', false);
+                    return;
+                }
+                $.post(ajaxUrl, {
+                    action: 'silvertell_cat_tree_create',
+                    nonce: nonce,
+                    name: name,
+                    parent: parent
+                }).done(function(res) {
+                    if (res && res.success) {
+                        window.location.reload();
+                    } else {
+                        msg($msg, (res && res.data && res.data.message) || 'Create failed', false);
+                    }
+                }).fail(function() {
+                    msg($msg, 'Request failed', false);
+                });
+            });
+
+            $(document).on('click', '.silvertell-cat-rename-btn', function() {
+                var $li = $(this).closest('li.silvertell-cat-li');
+                var $row = $li.children('.silvertell-cat-node').find('.silvertell-cat-node-row').first();
+                var $name = $row.find('.silvertell-cat-node-name');
+                if ($name.find('input').length) return;
+                var current = $name.data('name');
+                $name.html('<input type="text" class="silvertell-cat-rename-input" value="' + $('<div>').text(current).html() + '" />');
+                $row.find('.silvertell-cat-rename-btn').text('<?php echo esc_js(__('Save', 'silvertell-wc-customisation')); ?>').addClass('silvertell-cat-save-name').removeClass('silvertell-cat-rename-btn');
+            });
+
+            $(document).on('click', '.silvertell-cat-save-name', function() {
+                var $li = $(this).closest('li.silvertell-cat-li');
+                var termId = $li.data('term-id');
+                var name = $.trim($li.find('.silvertell-cat-rename-input').val());
+                if (!name) {
+                    alert('<?php echo esc_js(__('Name cannot be empty.', 'silvertell-wc-customisation')); ?>');
+                    return;
+                }
+                if ($li.data('range-related') && !confirm('<?php echo esc_js(__('This category is used for Product Range sub-tabs. Rename anyway?', 'silvertell-wc-customisation')); ?>')) {
+                    return;
+                }
+                $.post(ajaxUrl, {
+                    action: 'silvertell_cat_tree_update',
+                    nonce: nonce,
+                    term_id: termId,
+                    name: name
+                }).done(function(res) {
+                    if (res && res.success) {
+                        window.location.reload();
+                    } else {
+                        alert((res && res.data && res.data.message) || 'Rename failed');
+                    }
+                });
+            });
+
+            $(document).on('change', '.silvertell-cat-move-select', function() {
+                var $li = $(this).closest('li.silvertell-cat-li');
+                var termId = $li.data('term-id');
+                var parent = $(this).val();
+                if ($li.data('range-related') && !confirm('<?php echo esc_js(__('This category is used for Product Range sub-tabs. Move anyway?', 'silvertell-wc-customisation')); ?>')) {
+                    window.location.reload();
+                    return;
+                }
+                $.post(ajaxUrl, {
+                    action: 'silvertell_cat_tree_move',
+                    nonce: nonce,
+                    term_id: termId,
+                    parent: parent
+                }).done(function(res) {
+                    if (res && res.success) {
+                        window.location.reload();
+                    } else {
+                        alert((res && res.data && res.data.message) || 'Move failed');
+                        window.location.reload();
+                    }
+                });
+            });
+
+            $(document).on('click', '.silvertell-cat-delete-btn', function() {
+                var $li = $(this).closest('li.silvertell-cat-li');
+                var termId = $li.data('term-id');
+                var hasChildren = $li.find('> ul > li.silvertell-cat-li').length > 0;
+                var cascade = false;
+                if ($li.data('range-related') && !confirm('<?php echo esc_js(__('This category is used for Product Range sub-tabs. Delete anyway?', 'silvertell-wc-customisation')); ?>')) {
+                    return;
+                }
+                if (hasChildren) {
+                    if (!confirm('<?php echo esc_js(__('This category has child categories. Delete it and all descendants?', 'silvertell-wc-customisation')); ?>')) {
+                        return;
+                    }
+                    cascade = true;
+                } else if (!confirm('<?php echo esc_js(__('Delete this category?', 'silvertell-wc-customisation')); ?>')) {
+                    return;
+                }
+                $.post(ajaxUrl, {
+                    action: 'silvertell_cat_tree_delete',
+                    nonce: nonce,
+                    term_id: termId,
+                    cascade: cascade ? 1 : 0
+                }).done(function(res) {
+                    if (res && res.success) {
+                        window.location.reload();
+                    } else {
+                        alert((res && res.data && res.data.message) || 'Delete failed');
+                    }
+                });
+            });
+        });
+        </script>
+        <?php
+    }
+
+    private function render_category_tree_branch($children_map, $parent_id)
+    {
+        if (empty($children_map[$parent_id])) {
+            if ((int) $parent_id === 0) {
+                echo '<p>' . esc_html__('No product categories yet.', 'silvertell-wc-customisation') . '</p>';
+            }
+            return;
+        }
+        echo '<ul class="silvertell-cat-sortable" data-parent="' . esc_attr((int) $parent_id) . '">';
+        foreach ($children_map[$parent_id] as $term) {
+            $tid           = (int) $term->term_id;
+            $range_related = $this->is_product_range_related_term($term);
+            $exclude       = $this->collect_product_cat_descendant_ids($tid, $children_map);
+            $node_class    = 'silvertell-cat-node' . ($range_related ? ' is-product-range' : '');
+            echo '<li class="silvertell-cat-li" data-term-id="' . esc_attr($tid) . '" data-range-related="' . ($range_related ? '1' : '0') . '">';
+            echo '<div class="' . esc_attr($node_class) . '">';
+            echo '<div class="silvertell-cat-node-row">';
+            echo '<span class="dashicons dashicons-menu dd-drag-handle" title="' . esc_attr__('Drag to reorder', 'silvertell-wc-customisation') . '"></span>';
+            echo '<span class="silvertell-cat-node-name" data-name="' . esc_attr($term->name) . '">' . esc_html($term->name) . '</span>';
+            if ($range_related) {
+                echo '<span class="silvertell-cat-badge">' . esc_html__('Product Range', 'silvertell-wc-customisation') . '</span>';
+            }
+            echo '<span class="silvertell-cat-count">(' . esc_html(sprintf(
+                /* translators: %d: product count assigned to this category */
+                _n('%d product', '%d products', (int) $term->count, 'silvertell-wc-customisation'),
+                (int) $term->count
+            )) . ')</span>';
+            echo '<span class="silvertell-cat-node-actions">';
+            echo '<button type="button" class="button button-small silvertell-cat-rename-btn">' . esc_html__('Rename', 'silvertell-wc-customisation') . '</button>';
+            echo '<label class="screen-reader-text" for="silvertell-cat-move-' . esc_attr($tid) . '">' . esc_html__('Move under', 'silvertell-wc-customisation') . '</label>';
+            echo '<select id="silvertell-cat-move-' . esc_attr($tid) . '" class="silvertell-cat-move-select" title="' . esc_attr__('Move under…', 'silvertell-wc-customisation') . '">';
+            echo '<option value="0"' . selected((int) $term->parent, 0, false) . '>' . esc_html__('— Top level —', 'silvertell-wc-customisation') . '</option>';
+            $this->render_cat_parent_options($children_map, 0, 0, (int) $term->parent, $exclude);
+            echo '</select>';
+            echo '<button type="button" class="button button-small silvertell-cat-delete-btn" style="color:#b32d2e;">' . esc_html__('Delete', 'silvertell-wc-customisation') . '</button>';
+            echo '</span>';
+            echo '</div></div>';
+            $this->render_category_tree_branch($children_map, $tid);
+            echo '</li>';
+        }
+        echo '</ul>';
+    }
+
+    public function ajax_cat_tree_create()
+    {
+        $this->assert_cat_tool_ajax();
+        $name   = isset($_POST['name']) ? sanitize_text_field(wp_unslash($_POST['name'])) : '';
+        $parent = isset($_POST['parent']) ? absint($_POST['parent']) : 0;
+        if ($name === '') {
+            wp_send_json_error(['message' => __('Name is required.', 'silvertell-wc-customisation')]);
+        }
+        if ($parent && ! term_exists($parent, 'product_cat')) {
+            wp_send_json_error(['message' => __('Invalid parent category.', 'silvertell-wc-customisation')]);
+        }
+        $result = wp_insert_term($name, 'product_cat', ['parent' => $parent]);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        $siblings = get_terms([
+            'taxonomy'   => 'product_cat',
+            'parent'     => $parent,
+            'hide_empty' => false,
+            'fields'     => 'ids',
+        ]);
+        $order = is_array($siblings) ? count($siblings) : 1;
+        update_term_meta((int) $result['term_id'], 'order', $order);
+        $this->flush_category_attribute_map();
+        wp_send_json_success(['term_id' => (int) $result['term_id']]);
+    }
+
+    public function ajax_cat_tree_update()
+    {
+        $this->assert_cat_tool_ajax();
+        $term_id = isset($_POST['term_id']) ? absint($_POST['term_id']) : 0;
+        $name    = isset($_POST['name']) ? sanitize_text_field(wp_unslash($_POST['name'])) : '';
+        if (! $term_id || $name === '') {
+            wp_send_json_error(['message' => __('Invalid request.', 'silvertell-wc-customisation')]);
+        }
+        $term = get_term($term_id, 'product_cat');
+        if (! $term || is_wp_error($term)) {
+            wp_send_json_error(['message' => __('Category not found.', 'silvertell-wc-customisation')]);
+        }
+        $result = wp_update_term($term_id, 'product_cat', ['name' => $name]);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        $this->flush_category_attribute_map();
+        wp_send_json_success();
+    }
+
+    public function ajax_cat_tree_move()
+    {
+        $this->assert_cat_tool_ajax();
+        $term_id = isset($_POST['term_id']) ? absint($_POST['term_id']) : 0;
+        $parent  = isset($_POST['parent']) ? absint($_POST['parent']) : 0;
+        if (! $term_id) {
+            wp_send_json_error(['message' => __('Invalid request.', 'silvertell-wc-customisation')]);
+        }
+        $term = get_term($term_id, 'product_cat');
+        if (! $term || is_wp_error($term)) {
+            wp_send_json_error(['message' => __('Category not found.', 'silvertell-wc-customisation')]);
+        }
+        if ($parent === $term_id) {
+            wp_send_json_error(['message' => __('A category cannot be its own parent.', 'silvertell-wc-customisation')]);
+        }
+        if ($parent) {
+            if (! term_exists($parent, 'product_cat')) {
+                wp_send_json_error(['message' => __('Invalid parent category.', 'silvertell-wc-customisation')]);
+            }
+            $descendants = $this->collect_product_cat_descendant_ids($term_id);
+            if (in_array($parent, $descendants, true)) {
+                wp_send_json_error(['message' => __('Cannot move a category under one of its descendants.', 'silvertell-wc-customisation')]);
+            }
+        }
+        $result = wp_update_term($term_id, 'product_cat', ['parent' => $parent]);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        $this->flush_category_attribute_map();
+        wp_send_json_success();
+    }
+
+    public function ajax_cat_tree_reorder()
+    {
+        $this->assert_cat_tool_ajax();
+        $order = isset($_POST['order']) ? (array) $_POST['order'] : [];
+        $order = array_values(array_filter(array_map('absint', $order)));
+        if (empty($order)) {
+            wp_send_json_error(['message' => __('Nothing to reorder.', 'silvertell-wc-customisation')]);
+        }
+        $parent = null;
+        foreach ($order as $i => $term_id) {
+            $term = get_term($term_id, 'product_cat');
+            if (! $term || is_wp_error($term)) {
+                continue;
+            }
+            if ($parent === null) {
+                $parent = (int) $term->parent;
+            } elseif ((int) $term->parent !== $parent) {
+                wp_send_json_error(['message' => __('Reorder list must be siblings.', 'silvertell-wc-customisation')]);
+            }
+            update_term_meta($term_id, 'order', $i + 1);
+        }
+        $this->flush_category_attribute_map();
+        wp_send_json_success();
+    }
+
+    public function ajax_cat_tree_delete()
+    {
+        $this->assert_cat_tool_ajax();
+        $term_id = isset($_POST['term_id']) ? absint($_POST['term_id']) : 0;
+        $cascade = ! empty($_POST['cascade']);
+        if (! $term_id) {
+            wp_send_json_error(['message' => __('Invalid request.', 'silvertell-wc-customisation')]);
+        }
+        $term = get_term($term_id, 'product_cat');
+        if (! $term || is_wp_error($term)) {
+            wp_send_json_error(['message' => __('Category not found.', 'silvertell-wc-customisation')]);
+        }
+        $children = get_terms([
+            'taxonomy'   => 'product_cat',
+            'parent'     => $term_id,
+            'hide_empty' => false,
+            'fields'     => 'ids',
+        ]);
+        $has_children = ! is_wp_error($children) && ! empty($children);
+        if ($has_children && ! $cascade) {
+            wp_send_json_error(['message' => __('This category has children. Confirm cascade delete, or delete children first.', 'silvertell-wc-customisation')]);
+        }
+        if ($cascade && $has_children) {
+            $ids = array_reverse($this->collect_product_cat_descendant_ids($term_id));
+            foreach ($ids as $id) {
+                $del = wp_delete_term($id, 'product_cat');
+                if (is_wp_error($del)) {
+                    wp_send_json_error(['message' => $del->get_error_message()]);
+                }
+            }
+        } else {
+            $del = wp_delete_term($term_id, 'product_cat');
+            if (is_wp_error($del) || $del === false) {
+                wp_send_json_error(['message' => is_wp_error($del) ? $del->get_error_message() : __('Delete failed.', 'silvertell-wc-customisation')]);
+            }
+        }
+        $this->flush_category_attribute_map();
+        wp_send_json_success();
+    }
+
+    private function render_bulk_reassign_panel()
+    {
+        $children_map = $this->get_product_cat_children_map();
+        $nonce        = wp_create_nonce('silvertell_cat_tool');
+        ?>
+        <p class="description" style="margin-bottom:16px;">
+            <?php esc_html_e('Reassign categories on top-level products only (the ones shown in the shop). Child / variant products are excluded — edit Product Range labels via the Child Products popup on the parent product.', 'silvertell-wc-customisation'); ?>
+        </p>
+
+        <div class="silvertell-cat-bulk-filters" style="background:#fff;border:1px solid #c3c4c7;padding:14px 16px;margin-bottom:16px;border-radius:4px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+            <p style="margin:0;">
+                <label for="silvertell-bulk-search" style="display:block;font-weight:600;margin-bottom:4px;"><?php esc_html_e('Search', 'silvertell-wc-customisation'); ?></label>
+                <input type="search" id="silvertell-bulk-search" class="regular-text" placeholder="<?php esc_attr_e('Title or SKU…', 'silvertell-wc-customisation'); ?>" />
+            </p>
+            <p style="margin:0;">
+                <label for="silvertell-bulk-filter-cat" style="display:block;font-weight:600;margin-bottom:4px;"><?php esc_html_e('Currently in category', 'silvertell-wc-customisation'); ?></label>
+                <select id="silvertell-bulk-filter-cat">
+                    <option value="0"><?php esc_html_e('— Any —', 'silvertell-wc-customisation'); ?></option>
+                    <?php $this->render_cat_parent_options($children_map); ?>
+                </select>
+            </p>
+            <p style="margin:0;">
+                <button type="button" class="button" id="silvertell-bulk-refresh"><?php esc_html_e('Refresh list', 'silvertell-wc-customisation'); ?></button>
+            </p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;">
+            <div>
+                <div style="margin-bottom:8px;">
+                    <label><input type="checkbox" id="silvertell-bulk-select-page" /> <?php esc_html_e('Select all on this page', 'silvertell-wc-customisation'); ?></label>
+                    <span id="silvertell-bulk-selected-count" style="margin-left:12px;color:#646970;"></span>
+                </div>
+                <table class="widefat striped" id="silvertell-bulk-table">
+                    <thead>
+                        <tr>
+                            <th style="width:36px;"></th>
+                            <th><?php esc_html_e('Product', 'silvertell-wc-customisation'); ?></th>
+                            <th><?php esc_html_e('SKU', 'silvertell-wc-customisation'); ?></th>
+                            <th><?php esc_html_e('Categories', 'silvertell-wc-customisation'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody id="silvertell-bulk-tbody">
+                        <tr><td colspan="4"><?php esc_html_e('Loading…', 'silvertell-wc-customisation'); ?></td></tr>
+                    </tbody>
+                </table>
+                <div id="silvertell-bulk-pager" style="margin-top:10px;display:flex;gap:8px;align-items:center;"></div>
+            </div>
+
+            <div style="background:#fff;border:1px solid #c3c4c7;padding:14px 16px;border-radius:4px;position:sticky;top:32px;">
+                <h2 style="margin:0 0 10px;font-size:14px;"><?php esc_html_e('Apply to selected', 'silvertell-wc-customisation'); ?></h2>
+                <fieldset style="margin:0 0 12px;border:0;padding:0;">
+                    <legend style="font-weight:600;margin-bottom:6px;"><?php esc_html_e('Mode', 'silvertell-wc-customisation'); ?></legend>
+                    <label style="display:block;margin:0 0 4px;"><input type="radio" name="silvertell_bulk_mode" value="replace" checked /> <?php esc_html_e('Replace (set exactly these)', 'silvertell-wc-customisation'); ?></label>
+                    <label style="display:block;margin:0 0 4px;"><input type="radio" name="silvertell_bulk_mode" value="add" /> <?php esc_html_e('Add (keep existing)', 'silvertell-wc-customisation'); ?></label>
+                    <label style="display:block;"><input type="radio" name="silvertell_bulk_mode" value="remove" /> <?php esc_html_e('Remove selected only', 'silvertell-wc-customisation'); ?></label>
+                </fieldset>
+                <p style="font-weight:600;margin:0 0 6px;"><?php esc_html_e('Categories', 'silvertell-wc-customisation'); ?></p>
+                <div id="silvertell-bulk-cat-checklist" class="categorydiv" style="max-height:280px;overflow:auto;border:1px solid #dcdcde;padding:8px;background:#fcfcfc;">
+                    <ul class="categorychecklist">
+                        <?php
+                        // Dummy post ID 0 → empty selection; checklist posts tax_input[product_cat][].
+                        wp_terms_checklist(0, [
+                            'taxonomy'      => 'product_cat',
+                            'checked_ontop' => false,
+                        ]);
+                        ?>
+                    </ul>
+                </div>
+                <p style="margin:14px 0 0;">
+                    <button type="button" class="button button-primary button-large" id="silvertell-bulk-apply" style="width:100%;"><?php esc_html_e('Apply to selected products', 'silvertell-wc-customisation'); ?></button>
+                </p>
+                <div id="silvertell-bulk-progress-wrap" style="display:none;margin-top:12px;">
+                    <div style="background:#f0f0f1;border-radius:3px;overflow:hidden;height:18px;">
+                        <div id="silvertell-bulk-progress-bar" style="height:100%;width:0;background:#2271b1;transition:width .2s;"></div>
+                    </div>
+                    <p id="silvertell-bulk-progress-text" class="description" style="margin:6px 0 0;"></p>
+                    <div id="silvertell-bulk-log" style="max-height:160px;overflow:auto;font-family:monospace;font-size:12px;margin-top:8px;background:#1d2327;color:#f0f0f1;padding:8px;border-radius:3px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        jQuery(function($) {
+            var nonce = <?php echo wp_json_encode($nonce); ?>;
+            var ajaxUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+            var page = 1;
+            var perPage = 20;
+            var selected = {};
+
+            function updateSelectedCount() {
+                var n = Object.keys(selected).length;
+                $('#silvertell-bulk-selected-count').text(n ? (n + ' selected') : '');
+            }
+
+            function loadProducts() {
+                $('#silvertell-bulk-tbody').html('<tr><td colspan="4">Loading…</td></tr>');
+                $.post(ajaxUrl, {
+                    action: 'silvertell_cat_bulk_query',
+                    nonce: nonce,
+                    page: page,
+                    per_page: perPage,
+                    search: $('#silvertell-bulk-search').val(),
+                    category: $('#silvertell-bulk-filter-cat').val()
+                }).done(function(res) {
+                    if (!res || !res.success) {
+                        $('#silvertell-bulk-tbody').html('<tr><td colspan="4">' + ((res && res.data && res.data.message) || 'Failed') + '</td></tr>');
+                        return;
+                    }
+                    var products = res.data.products || [];
+                    var total = res.data.total || 0;
+                    var pages = Math.max(1, Math.ceil(total / perPage));
+                    if (!products.length) {
+                        $('#silvertell-bulk-tbody').html('<tr><td colspan="4"><?php echo esc_js(__('No top-level products found.', 'silvertell-wc-customisation')); ?></td></tr>');
+                    } else {
+                        var rows = products.map(function(p) {
+                            var checked = selected[p.id] ? ' checked' : '';
+                            return '<tr><td><input type="checkbox" class="silvertell-bulk-cb" value="' + p.id + '"' + checked + ' /></td>' +
+                                '<td><a href="' + p.edit_url + '" target="_blank">' + $('<div>').text(p.title).html() + '</a></td>' +
+                                '<td>' + $('<div>').text(p.sku || '—').html() + '</td>' +
+                                '<td>' + $('<div>').text(p.categories || '—').html() + '</td></tr>';
+                        }).join('');
+                        $('#silvertell-bulk-tbody').html(rows);
+                    }
+                    var $pager = $('#silvertell-bulk-pager').empty();
+                    $pager.append('<span>Page ' + page + ' / ' + pages + ' (' + total + ' products)</span>');
+                    var $prev = $('<button type="button" class="button">Prev</button>').prop('disabled', page <= 1).on('click', function() {
+                        page--;
+                        loadProducts();
+                    });
+                    var $next = $('<button type="button" class="button">Next</button>').prop('disabled', page >= pages).on('click', function() {
+                        page++;
+                        loadProducts();
+                    });
+                    $pager.append($prev).append($next);
+                    $('#silvertell-bulk-select-page').prop('checked', false);
+                    updateSelectedCount();
+                });
+            }
+
+            $('#silvertell-bulk-refresh').on('click', function() {
+                page = 1;
+                loadProducts();
+            });
+            $('#silvertell-bulk-search').on('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    page = 1;
+                    loadProducts();
+                }
+            });
+
+            $(document).on('change', '.silvertell-bulk-cb', function() {
+                var id = $(this).val();
+                if (this.checked) selected[id] = true;
+                else delete selected[id];
+                updateSelectedCount();
+            });
+
+            $('#silvertell-bulk-select-page').on('change', function() {
+                var on = this.checked;
+                $('#silvertell-bulk-tbody .silvertell-bulk-cb').each(function() {
+                    this.checked = on;
+                    if (on) selected[$(this).val()] = true;
+                    else delete selected[$(this).val()];
+                });
+                updateSelectedCount();
+            });
+
+            function selectedTermIds() {
+                return $('#silvertell-bulk-cat-checklist input[name="tax_input[product_cat][]"]:checked').map(function() {
+                    return parseInt($(this).val(), 10);
+                }).get().filter(Boolean);
+            }
+
+            function appendLog(html) {
+                $('#silvertell-bulk-log').append('<div>' + html + '</div>').scrollTop(99999);
+            }
+
+            $('#silvertell-bulk-apply').on('click', function() {
+                var ids = Object.keys(selected).map(function(k) { return parseInt(k, 10); }).filter(Boolean);
+                var terms = selectedTermIds();
+                var mode = $('input[name="silvertell_bulk_mode"]:checked').val();
+                if (!ids.length) {
+                    alert('<?php echo esc_js(__('Select at least one product.', 'silvertell-wc-customisation')); ?>');
+                    return;
+                }
+                if (!terms.length && mode !== 'replace') {
+                    alert('<?php echo esc_js(__('Select at least one category.', 'silvertell-wc-customisation')); ?>');
+                    return;
+                }
+                if (mode === 'replace' && !terms.length && !confirm('<?php echo esc_js(__('Replace with no categories will clear all categories on the selected products. Continue?', 'silvertell-wc-customisation')); ?>')) {
+                    return;
+                }
+                var chunkSize = 20;
+                var offset = 0;
+                var total = ids.length;
+                $('#silvertell-bulk-progress-wrap').show();
+                $('#silvertell-bulk-log').empty();
+                $('#silvertell-bulk-progress-bar').css('width', '0%');
+                $('#silvertell-bulk-apply').prop('disabled', true);
+
+                function runChunk() {
+                    var slice = ids.slice(offset, offset + chunkSize);
+                    if (!slice.length) {
+                        $('#silvertell-bulk-progress-bar').css('width', '100%');
+                        $('#silvertell-bulk-progress-text').text('Done.');
+                        appendLog('<span style="color:#46b450;">Completed ' + total + ' products.</span>');
+                        $('#silvertell-bulk-apply').prop('disabled', false);
+                        selected = {};
+                        updateSelectedCount();
+                        loadProducts();
+                        return;
+                    }
+                    $.post(ajaxUrl, {
+                        action: 'silvertell_cat_bulk_apply',
+                        nonce: nonce,
+                        mode: mode,
+                        product_ids: slice,
+                        term_ids: terms,
+                        finalize: (offset + slice.length >= total) ? 1 : 0
+                    }).done(function(res) {
+                        if (!res || !res.success) {
+                            appendLog('<span style="color:#f0b849;">' + ((res && res.data && res.data.message) || 'Chunk failed') + '</span>');
+                            $('#silvertell-bulk-apply').prop('disabled', false);
+                            return;
+                        }
+                        (res.data.logs || []).forEach(function(line) { appendLog(line); });
+                        offset += slice.length;
+                        var pct = Math.round((offset / total) * 100);
+                        $('#silvertell-bulk-progress-bar').css('width', pct + '%');
+                        $('#silvertell-bulk-progress-text').text(offset + ' / ' + total);
+                        runChunk();
+                    }).fail(function() {
+                        appendLog('<span style="color:#f0b849;">Server error — stopped.</span>');
+                        $('#silvertell-bulk-apply').prop('disabled', false);
+                    });
+                }
+                runChunk();
+            });
+
+            loadProducts();
+        });
+        </script>
+        <?php
+    }
+
+    public function ajax_cat_bulk_query()
+    {
+        $this->assert_cat_tool_ajax();
+        $page     = max(1, isset($_POST['page']) ? absint($_POST['page']) : 1);
+        $per_page = min(50, max(5, isset($_POST['per_page']) ? absint($_POST['per_page']) : 20));
+        $search   = isset($_POST['search']) ? sanitize_text_field(wp_unslash($_POST['search'])) : '';
+        $category = isset($_POST['category']) ? absint($_POST['category']) : 0;
+
+        $args = [
+            'post_type'      => 'product',
+            'post_status'    => ['publish', 'draft', 'pending', 'private'],
+            'post_parent'    => 0,
+            'posts_per_page' => $per_page,
+            'paged'          => $page,
+            'orderby'        => 'title',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+        ];
+        if ($search !== '') {
+            $args['s'] = $search;
+        }
+        if ($category) {
+            $args['tax_query'] = [[
+                'taxonomy'         => 'product_cat',
+                'field'            => 'term_id',
+                'terms'            => [$category],
+                'include_children' => true,
+            ]];
+        }
+
+        // SKU search: if a title search returns nothing useful, also match _sku.
+        $query = new WP_Query($args);
+        $ids   = $query->posts;
+        $total = (int) $query->found_posts;
+
+        if ($search !== '' && function_exists('wc_get_product_id_by_sku')) {
+            $sku_id = wc_get_product_id_by_sku($search);
+            if ($sku_id) {
+                $sku_post = get_post($sku_id);
+                if ($sku_post && $sku_post->post_type === 'product' && (int) $sku_post->post_parent === 0) {
+                    if (! in_array($sku_id, $ids, true)) {
+                        array_unshift($ids, $sku_id);
+                        $total++;
+                    }
+                }
+            }
+        }
+
+        $products = [];
+        foreach ($ids as $id) {
+            $product = function_exists('wc_get_product') ? wc_get_product($id) : null;
+            $terms   = get_the_terms($id, 'product_cat');
+            $labels  = [];
+            if ($terms && ! is_wp_error($terms)) {
+                foreach ($terms as $t) {
+                    $labels[] = $t->name;
+                }
+            }
+            $products[] = [
+                'id'         => (int) $id,
+                'title'      => get_the_title($id),
+                'sku'        => $product ? $product->get_sku() : '',
+                'categories' => implode(', ', $labels),
+                'edit_url'   => get_edit_post_link($id, 'raw'),
+            ];
+        }
+
+        wp_send_json_success([
+            'products' => $products,
+            'total'    => $total,
+            'page'     => $page,
+        ]);
+    }
+
+    public function ajax_cat_bulk_apply()
+    {
+        $this->assert_cat_tool_ajax();
+        $mode     = isset($_POST['mode']) ? sanitize_key($_POST['mode']) : '';
+        $finalize = ! empty($_POST['finalize']);
+        if (! in_array($mode, ['replace', 'add', 'remove'], true)) {
+            wp_send_json_error(['message' => __('Invalid mode.', 'silvertell-wc-customisation')]);
+        }
+        $product_ids = isset($_POST['product_ids']) ? array_values(array_filter(array_map('absint', (array) $_POST['product_ids']))) : [];
+        $term_ids    = isset($_POST['term_ids']) ? array_values(array_filter(array_map('absint', (array) $_POST['term_ids']))) : [];
+        if (empty($product_ids)) {
+            wp_send_json_error(['message' => __('No products in this chunk.', 'silvertell-wc-customisation')]);
+        }
+
+        // Validate term IDs exist (empty allowed for replace = clear all).
+        foreach ($term_ids as $tid) {
+            $t = get_term($tid, 'product_cat');
+            if (! $t || is_wp_error($t)) {
+                wp_send_json_error(['message' => sprintf(__('Invalid category ID: %d', 'silvertell-wc-customisation'), $tid)]);
+            }
+        }
+
+        $logs = [];
+        foreach ($product_ids as $pid) {
+            $post = get_post($pid);
+            if (! $post || $post->post_type !== 'product' || (int) $post->post_parent !== 0) {
+                $logs[] = '<span style="color:#f0b849;">Skipped #' . (int) $pid . ' (not a top-level product)</span>';
+                continue;
+            }
+            $title = get_the_title($pid);
+            if ($mode === 'replace') {
+                $result = wp_set_object_terms($pid, $term_ids, 'product_cat', false);
+            } elseif ($mode === 'add') {
+                $result = wp_set_object_terms($pid, $term_ids, 'product_cat', true);
+            } else {
+                $current = wp_get_post_terms($pid, 'product_cat', ['fields' => 'ids']);
+                if (is_wp_error($current)) {
+                    $logs[] = '<span style="color:#f0b849;">Failed ' . esc_html($title) . ': ' . esc_html($current->get_error_message()) . '</span>';
+                    continue;
+                }
+                $remaining = array_values(array_diff(array_map('intval', $current), $term_ids));
+                $result    = wp_set_object_terms($pid, $remaining, 'product_cat', false);
+            }
+            if (is_wp_error($result)) {
+                $logs[] = '<span style="color:#f0b849;">Failed ' . esc_html($title) . ': ' . esc_html($result->get_error_message()) . '</span>';
+            } else {
+                $logs[] = esc_html($title) . ' — OK';
+                clean_post_cache($pid);
+                if (function_exists('wc_delete_product_transients')) {
+                    wc_delete_product_transients($pid);
+                }
+            }
+        }
+
+        if ($finalize) {
+            $this->flush_category_attribute_map();
+        }
+
+        wp_send_json_success(['logs' => $logs]);
     }
 
     public function add_custom_product_data_tabs($tabs)

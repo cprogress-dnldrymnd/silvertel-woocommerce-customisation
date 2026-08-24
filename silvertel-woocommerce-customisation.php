@@ -3428,7 +3428,7 @@ class Silvertell_Woocommerce_Customisation
                 padding: 2.375rem;
                 display: flex;
                 flex-direction: column;
-                border: 1px solid #0089FF;
+                border: 1px solid #d5d5d5;
             }
 
             .product .product-wrapper.product-background .product-content-wrapper {

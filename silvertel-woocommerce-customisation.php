@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.54.0
+ * Version: 2.55.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3719,6 +3719,191 @@ class Silvertell_Woocommerce_Customisation
 
             }
 
+            /* ---- Shop catalog ordering / per-page dropdown ---- */
+            .shop-sorting-wrapper .sorting-per-page,
+            .woocommerce-ordering {
+                position: relative;
+                width: auto !important;
+                min-width: 160px;
+                max-width: 100%;
+                margin: 0;
+            }
+
+            .woocommerce-ordering select.perpage,
+            .woocommerce-ordering select.orderby {
+                -webkit-appearance: none;
+                appearance: none;
+                display: block;
+                width: 100% !important;
+                min-width: 160px;
+                height: 44px;
+                padding: 0 44px 0 18px;
+                border: 1px solid #d5d5d5;
+                border-radius: 50px;
+                background-color: #fff;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2371717A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 16px center;
+                background-size: 18px;
+                font-family: inherit;
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 44px;
+                color: #111;
+                cursor: pointer;
+                box-shadow: none;
+            }
+
+            .woocommerce-ordering select.perpage:hover,
+            .woocommerce-ordering select.orderby:hover,
+            .woocommerce-ordering select.perpage:focus,
+            .woocommerce-ordering select.orderby:focus {
+                border-color: var(--e-global-color-c172edd, #0089FF);
+                outline: none;
+                box-shadow: 0 0 0 3px rgba(0, 137, 255, 0.15);
+            }
+
+            .woocommerce-ordering.dd-order-enhanced select.perpage,
+            .woocommerce-ordering.dd-order-enhanced select.orderby {
+                position: absolute;
+                width: 1px !important;
+                min-width: 0;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+                background: none;
+                pointer-events: none;
+            }
+
+            .dd-order-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                width: 100%;
+                min-width: 160px;
+                height: 44px;
+                padding: 0 16px 0 18px;
+                border: 1px solid #d5d5d5;
+                border-radius: 50px;
+                background: #fff;
+                font: inherit;
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 1.2;
+                color: #111;
+                cursor: pointer;
+                text-align: left;
+                box-shadow: none;
+                transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            }
+
+            .dd-order-toggle:hover,
+            .woocommerce-ordering.dd-order-open .dd-order-toggle {
+                border-color: var(--e-global-color-c172edd, #0089FF);
+            }
+
+            .dd-order-toggle:focus {
+                outline: none;
+            }
+
+            .dd-order-toggle:focus-visible {
+                border-color: var(--e-global-color-c172edd, #0089FF);
+                box-shadow: 0 0 0 3px rgba(0, 137, 255, 0.15);
+            }
+
+            .dd-order-toggle::after {
+                content: '';
+                flex: 0 0 18px;
+                width: 18px;
+                height: 18px;
+                background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2371717A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 18px no-repeat;
+                transition: transform 0.2s ease;
+            }
+
+            .woocommerce-ordering.dd-order-open .dd-order-toggle::after {
+                transform: rotate(180deg);
+            }
+
+            .dd-order-menu {
+                display: none;
+                position: absolute;
+                top: calc(100% + 6px);
+                right: 0;
+                left: 0;
+                z-index: 30;
+                margin: 0;
+                padding: 6px;
+                list-style: none;
+                background: #fff;
+                border: 1px solid #d5d5d5;
+                border-radius: 12px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            }
+
+            .dd-order-menu li {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+            }
+
+            .woocommerce-ordering.dd-order-open .dd-order-menu {
+                display: block;
+            }
+
+            .dd-order-option {
+                display: block;
+                width: 100%;
+                padding: 10px 14px;
+                border: 0;
+                border-radius: 8px;
+                background: none;
+                font: inherit;
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 1.3;
+                color: #111;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .dd-order-option:hover,
+            .dd-order-option:focus {
+                background: #F4F4F4;
+                outline: none;
+            }
+
+            .dd-order-option.is-selected {
+                background: var(--e-global-color-c172edd, #0089FF);
+                color: #fff;
+            }
+
+            .dd-order-option.is-selected:hover,
+            .dd-order-option.is-selected:focus {
+                background: var(--e-global-color-c172edd, #0089FF);
+                color: #fff;
+            }
+
+            @media (max-width: 768px) {
+                .shop-sorting-wrapper .sorting-per-page,
+                .woocommerce-ordering,
+                .dd-order-toggle {
+                    min-width: 0;
+                    max-width: 220px;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .dd-order-toggle,
+                .dd-order-toggle::after {
+                    transition: none;
+                }
+            }
+
             .products .product {
                 background-color: #F4F4F4;
                 border-radius: 15px;
@@ -4601,6 +4786,120 @@ class Silvertell_Woocommerce_Customisation
                                 $(this).toggleClass('active', String($(this).data('panel')) === String(target));
                             });
                         });
+                    });
+
+                    // Shop ordering / per-page: custom list so the open menu is not the
+                    // native OS select. Keeps the real <select> in the form and fires
+                    // change so Fynode/WooCommerce still auto-submit.
+                    $('.woocommerce-ordering').each(function() {
+                        var $form = $(this);
+                        var $select = $form.find('select.perpage, select.orderby').first();
+                        if (!$select.length || $form.hasClass('dd-order-enhanced')) return;
+
+                        var menuId = 'dd-order-menu-' + String(Math.random()).slice(2, 9);
+                        var $toggle = $('<button type="button" class="dd-order-toggle" aria-haspopup="listbox" aria-expanded="false" />');
+                        var $menu = $('<ul class="dd-order-menu" role="listbox" />').attr('id', menuId);
+                        var $label = $('<span class="dd-order-label" />');
+                        $toggle.attr('aria-controls', menuId).append($label);
+
+                        function selectedText() {
+                            var $opt = $select.find('option:selected');
+                            return $opt.length ? $.trim($opt.text()) : $.trim($select.find('option').first().text());
+                        }
+
+                        function rebuildMenu() {
+                            $menu.empty();
+                            $select.find('option').each(function() {
+                                var $opt = $(this);
+                                var selected = $opt.is(':selected');
+                                var $btn = $('<button type="button" class="dd-order-option" role="option" />')
+                                    .attr('data-value', $opt.val())
+                                    .attr('aria-selected', selected ? 'true' : 'false')
+                                    .toggleClass('is-selected', selected)
+                                    .text($.trim($opt.text()));
+                                $menu.append($('<li />').append($btn));
+                            });
+                            $label.text(selectedText());
+                        }
+
+                        function closeMenu() {
+                            $form.removeClass('dd-order-open');
+                            $toggle.attr('aria-expanded', 'false');
+                        }
+
+                        function openMenu() {
+                            $form.addClass('dd-order-open');
+                            $toggle.attr('aria-expanded', 'true');
+                        }
+
+                        rebuildMenu();
+                        $select.attr({'tabindex': '-1', 'aria-hidden': 'true'});
+                        $form.addClass('dd-order-enhanced');
+                        $select.after($toggle, $menu);
+
+                        $form.on('click', function(e) {
+                            e.stopPropagation();
+                        });
+
+                        $toggle.on('click', function() {
+                            if ($form.hasClass('dd-order-open')) closeMenu();
+                            else openMenu();
+                        });
+
+                        $toggle.on('keydown', function(e) {
+                            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                openMenu();
+                                var $items = $menu.find('.dd-order-option');
+                                var $focus = $items.filter('.is-selected');
+                                ($focus.length ? $focus : (e.key === 'ArrowUp' ? $items.last() : $items.first())).focus();
+                            }
+                        });
+
+                        $menu.on('click', '.dd-order-option', function() {
+                            var val = $(this).attr('data-value');
+                            if (String($select.val()) === String(val)) {
+                                closeMenu();
+                                return;
+                            }
+                            $select.val(val).trigger('change');
+                        });
+
+                        $menu.on('keydown', '.dd-order-option', function(e) {
+                            var $items = $menu.find('.dd-order-option');
+                            var i = $items.index(this);
+                            if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                $items.eq(Math.min(i + 1, $items.length - 1)).focus();
+                            } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                $items.eq(Math.max(i - 1, 0)).focus();
+                            } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                closeMenu();
+                                $toggle.focus();
+                            } else if (e.key === 'Home') {
+                                e.preventDefault();
+                                $items.first().focus();
+                            } else if (e.key === 'End') {
+                                e.preventDefault();
+                                $items.last().focus();
+                            }
+                        });
+                    });
+
+                    $(document).on('click.ddOrder', function() {
+                        $('.woocommerce-ordering.dd-order-open')
+                            .removeClass('dd-order-open')
+                            .find('.dd-order-toggle').attr('aria-expanded', 'false');
+                    });
+
+                    $(document).on('keydown.ddOrder', function(e) {
+                        if (e.key !== 'Escape') return;
+                        var $open = $('.woocommerce-ordering.dd-order-open');
+                        if (!$open.length) return;
+                        $open.removeClass('dd-order-open')
+                            .find('.dd-order-toggle').attr('aria-expanded', 'false').focus();
                     });
                 });
             })(jQuery);

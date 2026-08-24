@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.55.0
+ * Version: 2.56.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -4790,103 +4790,136 @@ class Silvertell_Woocommerce_Customisation
 
                     // Shop ordering / per-page: custom list so the open menu is not the
                     // native OS select. Keeps the real <select> in the form and fires
-                    // change so Fynode/WooCommerce still auto-submit.
-                    $('.woocommerce-ordering').each(function() {
-                        var $form = $(this);
-                        var $select = $form.find('select.perpage, select.orderby').first();
-                        if (!$select.length || $form.hasClass('dd-order-enhanced')) return;
+                    // change so Fynode/WooCommerce still auto-submit. Re-run after
+                    // Fynode PJAX replaces .main-content (per-page / sort / filters).
+                    function enhanceOrderingDropdowns() {
+                        $('.woocommerce-ordering').each(function() {
+                            var $form = $(this);
+                            var $select = $form.find('select.perpage, select.orderby').first();
+                            if (!$select.length || $form.hasClass('dd-order-enhanced')) return;
 
-                        var menuId = 'dd-order-menu-' + String(Math.random()).slice(2, 9);
-                        var $toggle = $('<button type="button" class="dd-order-toggle" aria-haspopup="listbox" aria-expanded="false" />');
-                        var $menu = $('<ul class="dd-order-menu" role="listbox" />').attr('id', menuId);
-                        var $label = $('<span class="dd-order-label" />');
-                        $toggle.attr('aria-controls', menuId).append($label);
+                            var menuId = 'dd-order-menu-' + String(Math.random()).slice(2, 9);
+                            var $toggle = $('<button type="button" class="dd-order-toggle" aria-haspopup="listbox" aria-expanded="false" />');
+                            var $menu = $('<ul class="dd-order-menu" role="listbox" />').attr('id', menuId);
+                            var $label = $('<span class="dd-order-label" />');
+                            $toggle.attr('aria-controls', menuId).append($label);
 
-                        function selectedText() {
-                            var $opt = $select.find('option:selected');
-                            return $opt.length ? $.trim($opt.text()) : $.trim($select.find('option').first().text());
-                        }
+                            function selectedText() {
+                                var $opt = $select.find('option:selected');
+                                return $opt.length ? $.trim($opt.text()) : $.trim($select.find('option').first().text());
+                            }
 
-                        function rebuildMenu() {
-                            $menu.empty();
-                            $select.find('option').each(function() {
-                                var $opt = $(this);
-                                var selected = $opt.is(':selected');
-                                var $btn = $('<button type="button" class="dd-order-option" role="option" />')
-                                    .attr('data-value', $opt.val())
-                                    .attr('aria-selected', selected ? 'true' : 'false')
-                                    .toggleClass('is-selected', selected)
-                                    .text($.trim($opt.text()));
-                                $menu.append($('<li />').append($btn));
+                            function rebuildMenu() {
+                                $menu.empty();
+                                $select.find('option').each(function() {
+                                    var $opt = $(this);
+                                    var selected = $opt.is(':selected');
+                                    var $btn = $('<button type="button" class="dd-order-option" role="option" />')
+                                        .attr('data-value', $opt.val())
+                                        .attr('aria-selected', selected ? 'true' : 'false')
+                                        .toggleClass('is-selected', selected)
+                                        .text($.trim($opt.text()));
+                                    $menu.append($('<li />').append($btn));
+                                });
+                                $label.text(selectedText());
+                            }
+
+                            function closeMenu() {
+                                $form.removeClass('dd-order-open');
+                                $toggle.attr('aria-expanded', 'false');
+                            }
+
+                            function openMenu() {
+                                $form.addClass('dd-order-open');
+                                $toggle.attr('aria-expanded', 'true');
+                            }
+
+                            rebuildMenu();
+                            $select.attr({'tabindex': '-1', 'aria-hidden': 'true'});
+                            $form.addClass('dd-order-enhanced');
+                            $select.after($toggle, $menu);
+
+                            $form.on('click', function(e) {
+                                e.stopPropagation();
                             });
-                            $label.text(selectedText());
-                        }
 
-                        function closeMenu() {
-                            $form.removeClass('dd-order-open');
-                            $toggle.attr('aria-expanded', 'false');
-                        }
+                            $toggle.on('click', function() {
+                                if ($form.hasClass('dd-order-open')) closeMenu();
+                                else openMenu();
+                            });
 
-                        function openMenu() {
-                            $form.addClass('dd-order-open');
-                            $toggle.attr('aria-expanded', 'true');
-                        }
+                            $toggle.on('keydown', function(e) {
+                                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    openMenu();
+                                    var $items = $menu.find('.dd-order-option');
+                                    var $focus = $items.filter('.is-selected');
+                                    ($focus.length ? $focus : (e.key === 'ArrowUp' ? $items.last() : $items.first())).focus();
+                                }
+                            });
 
-                        rebuildMenu();
-                        $select.attr({'tabindex': '-1', 'aria-hidden': 'true'});
-                        $form.addClass('dd-order-enhanced');
-                        $select.after($toggle, $menu);
+                            $menu.on('click', '.dd-order-option', function() {
+                                var val = $(this).attr('data-value');
+                                if (String($select.val()) === String(val)) {
+                                    closeMenu();
+                                    return;
+                                }
+                                $select.val(val).trigger('change');
+                            });
 
-                        $form.on('click', function(e) {
-                            e.stopPropagation();
-                        });
-
-                        $toggle.on('click', function() {
-                            if ($form.hasClass('dd-order-open')) closeMenu();
-                            else openMenu();
-                        });
-
-                        $toggle.on('keydown', function(e) {
-                            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                openMenu();
+                            $menu.on('keydown', '.dd-order-option', function(e) {
                                 var $items = $menu.find('.dd-order-option');
-                                var $focus = $items.filter('.is-selected');
-                                ($focus.length ? $focus : (e.key === 'ArrowUp' ? $items.last() : $items.first())).focus();
-                            }
+                                var i = $items.index(this);
+                                if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    $items.eq(Math.min(i + 1, $items.length - 1)).focus();
+                                } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    $items.eq(Math.max(i - 1, 0)).focus();
+                                } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    closeMenu();
+                                    $toggle.focus();
+                                } else if (e.key === 'Home') {
+                                    e.preventDefault();
+                                    $items.first().focus();
+                                } else if (e.key === 'End') {
+                                    e.preventDefault();
+                                    $items.last().focus();
+                                }
+                            });
                         });
+                    }
 
-                        $menu.on('click', '.dd-order-option', function() {
-                            var val = $(this).attr('data-value');
-                            if (String($select.val()) === String(val)) {
-                                closeMenu();
-                                return;
-                            }
-                            $select.val(val).trigger('change');
-                        });
+                    enhanceOrderingDropdowns();
 
-                        $menu.on('keydown', '.dd-order-option', function(e) {
-                            var $items = $menu.find('.dd-order-option');
-                            var i = $items.index(this);
-                            if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                $items.eq(Math.min(i + 1, $items.length - 1)).focus();
-                            } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                $items.eq(Math.max(i - 1, 0)).focus();
-                            } else if (e.key === 'Escape') {
-                                e.preventDefault();
-                                closeMenu();
-                                $toggle.focus();
-                            } else if (e.key === 'Home') {
-                                e.preventDefault();
-                                $items.first().focus();
-                            } else if (e.key === 'End') {
-                                e.preventDefault();
-                                $items.last().focus();
+                    $(document).on('fynodeShopPageInit pjax:end pjax:complete pjax:success', enhanceOrderingDropdowns);
+
+                    if (window.MutationObserver) {
+                        var ddOrderQueued = false;
+                        var ddOrderObserver = new MutationObserver(function(mutations) {
+                            var found = false;
+                            for (var i = 0; i < mutations.length && !found; i++) {
+                                var nodes = mutations[i].addedNodes;
+                                for (var j = 0; j < nodes.length; j++) {
+                                    var n = nodes[j];
+                                    if (n.nodeType !== 1) continue;
+                                    if ((n.matches && n.matches('.woocommerce-ordering')) ||
+                                        (n.querySelector && n.querySelector('.woocommerce-ordering'))) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
                             }
+                            if (!found || ddOrderQueued) return;
+                            ddOrderQueued = true;
+                            setTimeout(function() {
+                                ddOrderQueued = false;
+                                enhanceOrderingDropdowns();
+                            }, 0);
                         });
-                    });
+                        ddOrderObserver.observe(document.body, { childList: true, subtree: true });
+                    }
 
                     $(document).on('click.ddOrder', function() {
                         $('.woocommerce-ordering.dd-order-open')

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.57.1
+ * Version: 2.57.2
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1944,7 +1944,7 @@ class Silvertell_Woocommerce_Customisation
             var nonce = <?php echo wp_json_encode($nonce); ?>;
             var ajaxUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
             var page = 1;
-            var perPage = 20;
+            var perPage = 100;
             var selected = {};
 
             function updateSelectedCount() {
@@ -2108,7 +2108,7 @@ class Silvertell_Woocommerce_Customisation
     {
         $this->assert_cat_tool_ajax();
         $page     = max(1, isset($_POST['page']) ? absint($_POST['page']) : 1);
-        $per_page = min(50, max(5, isset($_POST['per_page']) ? absint($_POST['per_page']) : 20));
+        $per_page = min(100, max(5, isset($_POST['per_page']) ? absint($_POST['per_page']) : 100));
         $search   = isset($_POST['search']) ? sanitize_text_field(wp_unslash($_POST['search'])) : '';
         $category = isset($_POST['category']) ? absint($_POST['category']) : 0;
 

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.57.0
+ * Version: 2.57.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -113,6 +113,7 @@ class Silvertell_Woocommerce_Customisation
 
         // Child products (sub-range groups / variants) live inside their parent's page,
         // so they must not be reachable as standalone single pages.
+        add_action('template_redirect', [$this, 'redirect_product_search_query_var'], 1);
         add_action('template_redirect', [$this, 'redirect_child_product_pages']);
 
         // Admin Products list: hide child products (sub-range groups / variants). They are
@@ -2397,6 +2398,37 @@ class Silvertell_Woocommerce_Customisation
         }
 
         return $tabs;
+    }
+
+    /**
+     * Some search widgets submit `?search=…&post_type=product` instead of WordPress's
+     * `?s=…`. Normalise to `s` so product search results load correctly.
+     */
+    public function redirect_product_search_query_var()
+    {
+        if (is_admin() || wp_doing_ajax()) return;
+        if (defined('REST_REQUEST') && REST_REQUEST) return;
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if (isset($_GET['s']) && $_GET['s'] !== '') return;
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if (empty($_GET['search'])) return;
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if (! isset($_GET['post_type']) || $_GET['post_type'] !== 'product') return;
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $term = sanitize_text_field(wp_unslash($_GET['search']));
+        if ($term === '') return;
+
+        $url = add_query_arg(
+            ['s' => $term, 'post_type' => 'product'],
+            remove_query_arg('search')
+        );
+
+        wp_safe_redirect($url, 302);
+        exit;
     }
 
     /**

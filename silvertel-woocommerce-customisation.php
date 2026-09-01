@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.57.4
+ * Version: 2.57.5
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -149,6 +149,7 @@ class Silvertell_Woocommerce_Customisation
         add_action('wp_ajax_silvertell_child_form', [$this, 'ajax_child_form']);
         add_action('wp_ajax_silvertell_child_save', [$this, 'ajax_child_save']);
         add_action('wp_ajax_silvertell_child_delete', [$this, 'ajax_child_delete']);
+        add_action('wp_ajax_silvertell_child_reorder', [$this, 'ajax_child_reorder']);
 
         // Assets
         add_action('admin_footer', [$this, 'inject_repeater_assets']);
@@ -2792,7 +2793,7 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Render the descendant tree of a product as nested rows with edit/add/delete actions.
+     * Render the descendant tree of a product as nested, sortable rows.
      */
     private function render_child_products_list($parent_id, $depth = 0)
     {
@@ -2801,7 +2802,7 @@ class Silvertell_Woocommerce_Customisation
             'post_type'   => 'product',
             'post_status' => ['publish', 'pending', 'draft', 'future', 'private'],
             'numberposts' => -1,
-            'orderby'     => 'menu_order title',
+            'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
             'order'       => 'ASC',
         ]);
 
@@ -2809,16 +2810,16 @@ class Silvertell_Woocommerce_Customisation
             return $depth === 0 ? '<p class="dd-child-empty">' . esc_html__('No child products yet.', 'silvertell-wc-customisation') . '</p>' : '';
         }
 
-        $html = $depth === 0 ? '<div class="dd-child-list">' : '';
+        $html = '<ul class="dd-child-sortable" data-parent="' . esc_attr($parent_id) . '">';
         foreach ($children as $child) {
             $product = wc_get_product($child->ID);
             $sku     = $product ? $product->get_sku() : '';
             $status  = $child->post_status !== 'publish' ? ' (' . esc_html($child->post_status) . ')' : '';
 
-            $html .= '<div class="dd-child-row" data-id="' . esc_attr($child->ID) . '">';
-            $html .= '<span class="dd-child-name" style="padding-left:' . ($depth * 22) . 'px;">'
-                . ($depth ? '<span class="dd-child-twig">' . str_repeat('— ', $depth) . '</span>' : '')
-                . esc_html($child->post_title) . $status . '</span>';
+            $html .= '<li class="dd-child-item" data-id="' . esc_attr($child->ID) . '">';
+            $html .= '<div class="dd-child-row">';
+            $html .= '<span class="dashicons dashicons-menu dd-drag-handle" title="' . esc_attr__('Drag to reorder', 'silvertell-wc-customisation') . '"></span>';
+            $html .= '<span class="dd-child-name">' . esc_html($child->post_title) . $status . '</span>';
             $html .= '<span class="dd-child-sku">' . ($sku !== '' ? esc_html($sku) : '&mdash;') . '</span>';
             $html .= '<span class="dd-child-actions">';
             $html .= '<button type="button" class="button dd-child-edit" data-id="' . esc_attr($child->ID) . '">' . esc_html__('Edit', 'silvertell-wc-customisation') . '</button> ';
@@ -2828,8 +2829,9 @@ class Silvertell_Woocommerce_Customisation
             $html .= '</div>';
 
             $html .= $this->render_child_products_list($child->ID, $depth + 1);
+            $html .= '</li>';
         }
-        if ($depth === 0) $html .= '</div>';
+        $html .= '</ul>';
 
         return $html;
     }
@@ -3039,6 +3041,7 @@ class Silvertell_Woocommerce_Customisation
 
         if (! $child_id && $parent_id) {
             $product->set_parent_id($parent_id);
+            $product->set_menu_order($this->next_child_menu_order($parent_id));
         }
 
         // SKU (guard against duplicates).
@@ -3138,6 +3141,62 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
+     * AJAX: persist sibling order after a drag-and-drop reorder in the Child Products list.
+     */
+    public function ajax_child_reorder()
+    {
+        check_ajax_referer('silvertell_child_ajax', 'nonce');
+        if (! current_user_can('edit_products')) wp_send_json_error(['message' => 'permission']);
+
+        $parent_id = isset($_POST['parent']) ? absint($_POST['parent']) : 0;
+        $order     = isset($_POST['order']) ? (array) $_POST['order'] : [];
+        $order     = array_values(array_filter(array_map('absint', $order)));
+
+        if (! $parent_id || empty($order)) {
+            wp_send_json_error(['message' => __('Nothing to reorder.', 'silvertell-wc-customisation')]);
+        }
+
+        foreach ($order as $position => $post_id) {
+            $post = get_post($post_id);
+            if (! $post || $post->post_type !== 'product' || (int) $post->post_parent !== $parent_id) {
+                wp_send_json_error(['message' => __('Reorder list must be siblings.', 'silvertell-wc-customisation')]);
+            }
+
+            wp_update_post([
+                'ID'         => $post_id,
+                'menu_order' => $position,
+            ]);
+        }
+
+        wp_send_json_success();
+    }
+
+    /**
+     * Next menu_order value for a new child under the given parent.
+     */
+    private function next_child_menu_order($parent_id)
+    {
+        $siblings = get_children([
+            'post_parent' => $parent_id,
+            'post_type'   => 'product',
+            'post_status' => 'any',
+            'numberposts' => -1,
+            'fields'      => 'ids',
+        ]);
+
+        if (empty($siblings)) return 0;
+
+        global $wpdb;
+        $placeholders = implode(',', array_fill(0, count($siblings), '%d'));
+        $max          = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT MAX(menu_order) FROM {$wpdb->posts} WHERE ID IN ({$placeholders})",
+            ...$siblings
+        ));
+
+        return $max + 1;
+    }
+
+    /**
      * Permanently delete a product and all of its descendant products (depth-first) so
      * none are left orphaned.
      */
@@ -3187,6 +3246,22 @@ class Silvertell_Woocommerce_Customisation
                 margin-bottom: 8px;
             }
 
+            ul.dd-child-sortable {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+
+            ul.dd-child-sortable ul.dd-child-sortable {
+                margin: 0 0 0 22px;
+                padding-left: 10px;
+                border-left: 1px dashed #dcdcde;
+            }
+
+            .dd-child-item {
+                margin: 0;
+            }
+
             .dd-child-row {
                 display: flex;
                 align-items: center;
@@ -3199,14 +3274,15 @@ class Silvertell_Woocommerce_Customisation
                 background: #f6f7f7;
             }
 
+            .dd-child-row .dd-drag-handle {
+                cursor: grab;
+                color: #8c8f94;
+                flex-shrink: 0;
+            }
+
             .dd-child-name {
                 flex: 1;
                 font-weight: 600;
-            }
-
-            .dd-child-twig {
-                color: #a0a5aa;
-                font-weight: 400;
             }
 
             .dd-child-sku {
@@ -3216,6 +3292,13 @@ class Silvertell_Woocommerce_Customisation
 
             .dd-child-actions {
                 white-space: nowrap;
+            }
+
+            .dd-child-placeholder {
+                height: 42px;
+                margin: 2px 0;
+                background: #f0f6fc;
+                border: 1px dashed #2271b1;
             }
 
             .dd-child-empty {
@@ -3537,6 +3620,43 @@ class Silvertell_Woocommerce_Customisation
                     $modal.hide();
                 }
 
+                function initChildSortables(ctx) {
+                    $(ctx).find('ul.dd-child-sortable').each(function() {
+                        var $ul = $(this);
+                        if ($ul.data('ui-sortable')) {
+                            $ul.sortable('destroy');
+                        }
+                        $ul.sortable({
+                            handle: '.dd-drag-handle',
+                            axis: 'y',
+                            items: '> li.dd-child-item',
+                            placeholder: 'dd-child-placeholder',
+                            update: function() {
+                                var order = $ul.children('li.dd-child-item').map(function() {
+                                    return $(this).data('id');
+                                }).get();
+                                $.post(ajaxurl, {
+                                    action: 'silvertell_child_reorder',
+                                    nonce: nonce,
+                                    parent: $ul.data('parent'),
+                                    order: order
+                                }).done(function(res) {
+                                    if (!res || !res.success) {
+                                        alert((res && res.data && res.data.message) || '<?php echo esc_js(__('Reorder failed.', 'silvertell-wc-customisation')); ?>');
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }
+
+                function refreshChildList(html) {
+                    $('.dd-child-list-wrap').html(html);
+                    initChildSortables($manager);
+                }
+
+                initChildSortables($manager);
+
                 $manager.on('click', '.dd-child-edit', function() {
                     openModal($(this).data('id'), 0, '<?php echo esc_js(__('Edit Child Product', 'silvertell-wc-customisation')); ?>');
                 });
@@ -3553,7 +3673,7 @@ class Silvertell_Woocommerce_Customisation
                         id: $(this).data('id'),
                         root: rootParent
                     }, function(res) {
-                        if (res && res.success) $('.dd-child-list-wrap').html(res.data.list);
+                        if (res && res.success) refreshChildList(res.data.list);
                     });
                 });
 
@@ -3626,7 +3746,7 @@ class Silvertell_Woocommerce_Customisation
                     $.post(ajaxurl, data, function(res) {
                         $modal.removeClass('is-saving');
                         if (res && res.success) {
-                            $('.dd-child-list-wrap').html(res.data.list);
+                            refreshChildList(res.data.list);
                             closeModal();
                         } else {
                             $modal.find('.dd-child-modal-msg').text((res && res.data && res.data.message) ? res.data.message : 'Save failed.');

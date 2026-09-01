@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.57.3
+ * Version: 2.57.4
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -130,8 +130,10 @@ class Silvertell_Woocommerce_Customisation
         // XML sitemaps: child products 301-redirect to their parent and must not be
         // listed as standalone URLs (core WP sitemaps + Yoast / Rank Math).
         add_filter('wp_sitemaps_posts_query_args', [$this, 'exclude_child_products_from_sitemap_query'], 10, 2);
-        add_filter('wpseo_xml_sitemap_post_url', [$this, 'exclude_child_products_from_yoast_sitemap'], 10, 2);
-        add_filter('rank_math/sitemap/entry', [$this, 'exclude_child_products_from_rankmath_sitemap'], 10, 3);
+        add_filter('wpseo_posts_where', [$this, 'exclude_child_products_from_sitemap_sql_where'], 10, 2);
+        add_filter('wpseo_typecount_where', [$this, 'exclude_child_products_from_sitemap_sql_where'], 10, 2);
+        add_filter('rank_math/sitemap/get_posts/where', [$this, 'exclude_child_products_from_sitemap_sql_where'], 10, 2);
+        add_filter('rank_math/sitemap/post_count/where', [$this, 'exclude_child_products_from_sitemap_sql_where'], 10, 2);
 
         // Elementor multi-category filters (?filter_cat=parent,child) often AND every
         // selected term, which empties the grid when a parent and its child are both
@@ -2520,35 +2522,21 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
-     * Exclude child products from Yoast SEO XML sitemaps.
+     * Append post_parent = 0 to sitemap SQL WHERE clauses for WooCommerce products.
+     * Used by Yoast SEO and Rank Math so child products are omitted from the query
+     * entirely (per-entry URL filters leave blank rows in Yoast's HTML view).
      *
-     * @param string|false $url  Sitemap URL for the post, or false to skip.
-     * @param WP_Post      $post Post object.
-     * @return string|false
-     */
-    public function exclude_child_products_from_yoast_sitemap($url, $post)
-    {
-        if (! $post instanceof WP_Post || $post->post_type !== 'product') return $url;
-        if ((int) $post->post_parent !== 0) return false;
-
-        return $url;
-    }
-
-    /**
-     * Exclude child products from Rank Math XML sitemaps.
-     *
-     * @param string $url    Sitemap entry XML.
-     * @param string $type   Sitemap object type.
-     * @param object $object Post (or other) object.
+     * @param string|false $where     Existing WHERE fragment.
+     * @param string       $post_type Post type being enumerated.
      * @return string
      */
-    public function exclude_child_products_from_rankmath_sitemap($url, $type, $object)
+    public function exclude_child_products_from_sitemap_sql_where($where, $post_type)
     {
-        if ($type !== 'post' || empty($url)) return $url;
-        if (! $object instanceof WP_Post || $object->post_type !== 'product') return $url;
-        if ((int) $object->post_parent !== 0) return '';
+        if ($post_type !== 'product') return (string) $where;
 
-        return $url;
+        global $wpdb;
+
+        return (string) $where . " AND {$wpdb->posts}.post_parent = 0 ";
     }
 
     /**

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.57.2
+ * Version: 2.57.3
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -126,6 +126,12 @@ class Silvertell_Woocommerce_Customisation
         // Frontend shop/archive: exclude child products from all WooCommerce product
         // listings — they surface only inside their parent's Product Range tab.
         add_action('woocommerce_product_query', [$this, 'hide_child_products_from_shop']);
+
+        // XML sitemaps: child products 301-redirect to their parent and must not be
+        // listed as standalone URLs (core WP sitemaps + Yoast / Rank Math).
+        add_filter('wp_sitemaps_posts_query_args', [$this, 'exclude_child_products_from_sitemap_query'], 10, 2);
+        add_filter('wpseo_xml_sitemap_post_url', [$this, 'exclude_child_products_from_yoast_sitemap'], 10, 2);
+        add_filter('rank_math/sitemap/entry', [$this, 'exclude_child_products_from_rankmath_sitemap'], 10, 3);
 
         // Elementor multi-category filters (?filter_cat=parent,child) often AND every
         // selected term, which empties the grid when a parent and its child are both
@@ -2495,6 +2501,54 @@ class Silvertell_Woocommerce_Customisation
     public function hide_child_products_from_shop($query)
     {
         $query->set('post_parent', 0);
+    }
+
+    /**
+     * Exclude child products from WordPress core XML sitemaps (wp-sitemap.xml).
+     *
+     * @param array  $args      WP_Query arguments for the sitemap provider.
+     * @param string $post_type Post type being enumerated.
+     * @return array
+     */
+    public function exclude_child_products_from_sitemap_query($args, $post_type)
+    {
+        if ($post_type !== 'product') return $args;
+
+        $args['post_parent'] = 0;
+
+        return $args;
+    }
+
+    /**
+     * Exclude child products from Yoast SEO XML sitemaps.
+     *
+     * @param string|false $url  Sitemap URL for the post, or false to skip.
+     * @param WP_Post      $post Post object.
+     * @return string|false
+     */
+    public function exclude_child_products_from_yoast_sitemap($url, $post)
+    {
+        if (! $post instanceof WP_Post || $post->post_type !== 'product') return $url;
+        if ((int) $post->post_parent !== 0) return false;
+
+        return $url;
+    }
+
+    /**
+     * Exclude child products from Rank Math XML sitemaps.
+     *
+     * @param string $url    Sitemap entry XML.
+     * @param string $type   Sitemap object type.
+     * @param object $object Post (or other) object.
+     * @return string
+     */
+    public function exclude_child_products_from_rankmath_sitemap($url, $type, $object)
+    {
+        if ($type !== 'post' || empty($url)) return $url;
+        if (! $object instanceof WP_Post || $object->post_type !== 'product') return $url;
+        if ((int) $object->post_parent !== 0) return '';
+
+        return $url;
     }
 
     /**

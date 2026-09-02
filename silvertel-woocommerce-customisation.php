@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.62.1
+ * Version: 2.62.2
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -5423,8 +5423,8 @@ class Silvertell_Woocommerce_Customisation
      * Returns ['groups' => [subtab_label => [section, ...]], 'flat' => [variant posts]] or
      * null when there is nothing to show. A "section" is
      * ['title', 'description', 'note', 'variants']. Products whose children are variants
-     * directly (2-level, e.g. Ag9700) populate 'flat'; a childless product that has its own
-     * attributes/buy links renders itself as a single flat row.
+     * directly (2-level, e.g. Ag9700) populate 'flat'; a childless product always renders
+     * itself as a single flat row.
      */
     private function build_product_range($product_id)
     {
@@ -5454,10 +5454,10 @@ class Silvertell_Woocommerce_Customisation
                 }
             }
         } else {
-            // Standalone product (no children): show itself if it carries spec/buy data.
-            $self = wc_get_product($product_id);
-            if ($self && ($this->product_has_visible_attributes($self, $product_id) || $this->render_provider_buttons($product_id) !== '')) {
-                $flat[] = get_post($product_id);
+            // Standalone product (no children): always show itself as the range row.
+            $post = get_post($product_id);
+            if ($post) {
+                $flat[] = $post;
             }
         }
 
@@ -5499,20 +5499,6 @@ class Silvertell_Woocommerce_Customisation
             }
         }
         return '';
-    }
-
-    private function product_has_visible_attributes($product, $range_product_id = 0)
-    {
-        foreach ($product->get_attributes() as $attr_key => $attr) {
-            if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) {
-                continue;
-            }
-            if ($this->is_range_attribute_hidden($attr_key, $attr, $product, $range_product_id)) {
-                continue;
-            }
-            return true;
-        }
-        return false;
     }
 
     private function render_range_subtabs($groups, $range_product_id = 0)

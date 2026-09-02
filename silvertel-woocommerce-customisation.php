@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.60.1
+ * Version: 2.62.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -92,6 +92,8 @@ class Silvertell_Woocommerce_Customisation
 
         // Frontend Single Product Tabs (rendered by the native WC tabs / Elementor Product Data Tabs widget)
         add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs'], 98);
+        add_filter('woocommerce_product_has_attributes', [$this, 'parent_has_child_attributes'], 10, 2);
+        add_filter('woocommerce_display_product_attributes', [$this, 'merge_child_attributes_into_additional_info'], 10, 2);
         add_action('wp_footer', [$this, 'inject_frontend_assets']);
 
         // Shop/archive grid: the theme strips the native loop button, so add a
@@ -1311,6 +1313,11 @@ class Silvertell_Woocommerce_Customisation
 
     public function sanitize_hidden_range_attributes($input)
     {
+        return $this->sanitize_hidden_range_attributes_input($input);
+    }
+
+    private function sanitize_hidden_range_attributes_input($input)
+    {
         $taxonomies = [];
         $custom     = [];
         if (is_array($input)) {
@@ -1347,9 +1354,8 @@ class Silvertell_Woocommerce_Customisation
         ];
     }
 
-    private static function get_hidden_range_attributes()
+    private static function normalize_hidden_range_attributes($stored)
     {
-        $stored = get_option('silvertell_hidden_range_attributes', []);
         if (! is_array($stored)) {
             return ['taxonomies' => [], 'custom' => []];
         }
@@ -1359,20 +1365,66 @@ class Silvertell_Woocommerce_Customisation
         ];
     }
 
-    private function is_range_attribute_hidden($attr_key, $attr, $product)
+    private static function get_hidden_range_attributes($range_product_id = 0)
     {
-        $hidden = self::get_hidden_range_attributes();
+        $global = self::normalize_hidden_range_attributes(get_option('silvertell_hidden_range_attributes', []));
+        if (! $range_product_id) {
+            return $global;
+        }
+        $product = self::normalize_hidden_range_attributes(get_post_meta($range_product_id, '_hidden_range_attributes', true));
+        return [
+            'taxonomies' => array_values(array_unique(array_merge($global['taxonomies'], $product['taxonomies']))),
+            'custom'     => array_values(array_unique(array_merge($global['custom'], $product['custom']))),
+        ];
+    }
+
+    private function is_range_attribute_hidden($attr_key, $attr, $product, $range_product_id = 0)
+    {
+        $hidden = self::get_hidden_range_attributes($range_product_id);
         if (in_array($attr_key, $hidden['taxonomies'], true)) {
             return true;
         }
         $name  = (is_object($attr) && method_exists($attr, 'get_name')) ? $attr->get_name() : $attr_key;
-        $label = wc_attribute_label($name, $product);
+        $label = function_exists('wc_attribute_label') ? wc_attribute_label($name, $product) : $name;
         foreach ($hidden['custom'] as $hidden_name) {
-            if (strcasecmp($hidden_name, $name) === 0 || strcasecmp($hidden_name, $label) === 0) {
+            if (strcasecmp((string) $hidden_name, (string) $name) === 0 || strcasecmp((string) $hidden_name, (string) $label) === 0) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Checkbox list + comma-separated custom field for hidden Product Range attributes.
+     *
+     * @param string $name_prefix   e.g. silvertell_hidden_range_attributes or _hidden_range_attributes
+     * @param array  $hidden_range  ['taxonomies' => [], 'custom' => []]
+     * @param string $custom_id     DOM id for the custom-names text input
+     */
+    private function render_hidden_range_attribute_inputs($name_prefix, array $hidden_range, $custom_id = '')
+    {
+        $attr_choices      = $this->get_attribute_taxonomy_choices();
+        $hidden_taxonomies = $hidden_range['taxonomies'];
+        $hidden_custom     = implode(', ', $hidden_range['custom']);
+        $custom_id         = $custom_id !== '' ? $custom_id : $name_prefix . '_custom';
+
+        if (empty($attr_choices)) {
+            echo '<p class="description">' . esc_html__('No global WooCommerce attributes are registered yet.', 'silvertell-wc-customisation') . '</p>';
+        } else {
+            echo '<fieldset style="margin:0 0 12px;">';
+            foreach ($attr_choices as $slug => $label) {
+                echo '<label style="display:block; margin-bottom:6px;">';
+                echo '<input type="checkbox" name="' . esc_attr($name_prefix) . '[taxonomies][]" value="' . esc_attr($slug) . '" ' . checked(in_array($slug, $hidden_taxonomies, true), true, false) . '>';
+                echo esc_html($label);
+                echo ' <code style="margin-left:6px; color:#646970;">' . esc_html($slug) . '</code>';
+                echo '</label>';
+            }
+            echo '</fieldset>';
+        }
+
+        echo '<label for="' . esc_attr($custom_id) . '" style="display:block; font-weight:600; margin-bottom:4px;">' . esc_html__('Hidden custom attributes', 'silvertell-wc-customisation') . '</label>';
+        echo '<input type="text" id="' . esc_attr($custom_id) . '" name="' . esc_attr($name_prefix) . '[custom]" value="' . esc_attr($hidden_custom) . '" class="regular-text" style="width:100%; max-width:480px;">';
+        echo '<p class="description">' . esc_html__('Comma-separated custom attribute names. Matches by attribute name or label (case-insensitive).', 'silvertell-wc-customisation') . '</p>';
     }
 
     private static function get_sample_providers()
@@ -1391,10 +1443,8 @@ class Silvertell_Woocommerce_Customisation
         if (! current_user_can('manage_woocommerce')) return;
         $current_keys     = get_option('silvertell_file_meta_keys', '_manual');
         $providers        = $this->get_sample_providers();
-        $attr_choices     = $this->get_attribute_taxonomy_choices();
         $hidden_range      = self::get_hidden_range_attributes();
         $hidden_taxonomies = $hidden_range['taxonomies'];
-        $hidden_custom     = implode(', ', $hidden_range['custom']);
         $range_template    = absint(get_option('silvertell_product_range_elementor_template', 0));
         ?>
         <div class="wrap dd-panel-wrapper" style="padding:0 !important; max-width: 900px;">
@@ -1430,32 +1480,13 @@ class Silvertell_Woocommerce_Customisation
                 </div>
                 <hr style="margin: 30px 0;">
                 <h2 class="title"><?php esc_html_e('Product Range Tab', 'silvertell-wc-customisation'); ?></h2>
-                <p class="description" style="margin-bottom:15px;"><?php esc_html_e('Choose attributes to hide from Product Range tables on the storefront. Hidden attributes remain on products and in the Additional information tab.', 'silvertell-wc-customisation'); ?></p>
+                <p class="description" style="margin-bottom:15px;"><?php esc_html_e('Choose attributes to hide from Product Range tables site-wide. Individual products can add more in the Product Range product tab. Hidden attributes remain on products and in the Additional information tab.', 'silvertell-wc-customisation'); ?></p>
                 <table class="form-table" role="presentation">
                     <tbody>
                         <tr>
-                            <th scope="row"><?php esc_html_e('Hidden global attributes', 'silvertell-wc-customisation'); ?></th>
+                            <th scope="row"><?php esc_html_e('Hidden attributes', 'silvertell-wc-customisation'); ?></th>
                             <td>
-                                <?php if (empty($attr_choices)) : ?>
-                                    <p class="description"><?php esc_html_e('No global WooCommerce attributes are registered yet.', 'silvertell-wc-customisation'); ?></p>
-                                <?php else : ?>
-                                    <fieldset>
-                                        <?php foreach ($attr_choices as $slug => $label) : ?>
-                                            <label style="display:block; margin-bottom:6px;">
-                                                <input type="checkbox" name="silvertell_hidden_range_attributes[taxonomies][]" value="<?php echo esc_attr($slug); ?>" <?php checked(in_array($slug, $hidden_taxonomies, true)); ?>>
-                                                <?php echo esc_html($label); ?>
-                                                <code style="margin-left:6px; color:#646970;"><?php echo esc_html($slug); ?></code>
-                                            </label>
-                                        <?php endforeach; ?>
-                                    </fieldset>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row"><label for="silvertell_hidden_range_custom"><?php esc_html_e('Hidden custom attributes', 'silvertell-wc-customisation'); ?></label></th>
-                            <td>
-                                <input type="text" id="silvertell_hidden_range_custom" name="silvertell_hidden_range_attributes[custom]" value="<?php echo esc_attr($hidden_custom); ?>" class="regular-text" style="width: 100%;">
-                                <p class="description"><?php esc_html_e('Comma-separated custom attribute names. Matches by attribute name or label (case-insensitive).', 'silvertell-wc-customisation'); ?></p>
+                                <?php $this->render_hidden_range_attribute_inputs('silvertell_hidden_range_attributes', ['taxonomies' => $hidden_taxonomies, 'custom' => $hidden_range['custom']], 'silvertell_hidden_range_custom'); ?>
                             </td>
                         </tr>
                         <tr>
@@ -3568,6 +3599,13 @@ class Silvertell_Woocommerce_Customisation
         $this->render_elementor_template_select('_product_range_elementor_template', $current_range_template, __('— Use global default —', 'silvertell-wc-customisation'));
         echo wp_kses_post(wc_help_tip(__('Optional. Shown below the Product Range table on this product\'s storefront tab. Leave as global default to use the template from Silvertell Settings.', 'silvertell-wc-customisation')));
         echo '</p>';
+
+        $product_hidden_range = self::normalize_hidden_range_attributes(get_post_meta($post->ID, '_hidden_range_attributes', true));
+        echo '<p class="form-field _hidden_range_attributes_field">';
+        echo '<label>' . esc_html__('Hidden attributes (this product)', 'silvertell-wc-customisation') . '</label>';
+        $this->render_hidden_range_attribute_inputs('_hidden_range_attributes', $product_hidden_range, '_hidden_range_attributes_custom');
+        echo wp_kses_post(wc_help_tip(__('Additional attributes to hide on this product\'s Product Range tab. These are merged with the site-wide list in Silvertell Settings.', 'silvertell-wc-customisation')));
+        echo '</p>';
         echo '</div></div>';
     }
 
@@ -3623,6 +3661,122 @@ class Silvertell_Woocommerce_Customisation
         }
 
         return $tabs;
+    }
+
+    /**
+     * Orderable variant IDs for a range parent (L2 flat + L3), excluding the parent itself.
+     * Wraps collect_range_link_sources() so tab visibility and attribute merging share one walk.
+     */
+    private function get_range_variant_product_ids($product_id)
+    {
+        $sources = self::collect_range_link_sources($product_id);
+        if (count($sources) <= 1) {
+            return [];
+        }
+        $ids = [];
+        foreach (array_slice($sources, 1) as $source) {
+            $ids[] = (int) $source['id'];
+        }
+        return $ids;
+    }
+
+    /** Whether a product has at least one visible attribute (ignores Product Range hide rules). */
+    private function variant_has_visible_attributes(WC_Product $product)
+    {
+        foreach ($product->get_attributes() as $attr) {
+            if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Show the Additional information tab when orderable variants carry specs even if the
+     * parent product object has no attributes of its own.
+     */
+    public function parent_has_child_attributes($has, $product)
+    {
+        if ($has || ! $product instanceof WC_Product) {
+            return $has;
+        }
+        foreach ($this->get_range_variant_product_ids($product->get_id()) as $variant_id) {
+            $variant = wc_get_product($variant_id);
+            if ($variant && $this->variant_has_visible_attributes($variant)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Merge visible attributes from all orderable child variants into the Additional
+     * information table. Values for the same attribute are de-duplicated and comma-joined.
+     * Product Range hidden-attribute rules do not apply here.
+     */
+    public function merge_child_attributes_into_additional_info($product_attributes, $product)
+    {
+        if (! $product instanceof WC_Product) {
+            return $product_attributes;
+        }
+
+        $variant_ids = $this->get_range_variant_product_ids($product->get_id());
+        if (empty($variant_ids)) {
+            return $product_attributes;
+        }
+
+        $products = [$product];
+        foreach ($variant_ids as $variant_id) {
+            $variant = wc_get_product($variant_id);
+            if ($variant) {
+                $products[] = $variant;
+            }
+        }
+
+        $map   = [];
+        $order = [];
+
+        foreach ($products as $p) {
+            foreach ($p->get_attributes() as $attr_key => $attr) {
+                if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) {
+                    continue;
+                }
+                $val = $p->get_attribute($attr_key);
+                if ($val === '') {
+                    continue;
+                }
+                $name = (is_object($attr) && method_exists($attr, 'get_name')) ? $attr->get_name() : $attr_key;
+                if (! isset($map[$attr_key])) {
+                    $map[$attr_key] = [
+                        'name'   => $name,
+                        'label'  => wc_attribute_label($name, $p),
+                        'values' => [],
+                    ];
+                    $order[] = $attr_key;
+                }
+                foreach (array_map('trim', explode(',', $val)) as $part) {
+                    if ($part !== '' && ! in_array($part, $map[$attr_key]['values'], true)) {
+                        $map[$attr_key]['values'][] = $part;
+                    }
+                }
+            }
+        }
+
+        if (empty($map)) {
+            return $product_attributes;
+        }
+
+        $out = [];
+        foreach ($order as $attr_key) {
+            $entry = $map[$attr_key];
+            $out['attribute_' . sanitize_title_with_dashes($entry['name'])] = [
+                'label' => $entry['label'],
+                'value' => wc_implode_text_attributes($entry['values']),
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -5214,7 +5368,8 @@ class Silvertell_Woocommerce_Customisation
         global $product;
         if (! $product instanceof WC_Product) return;
 
-        $range = $this->build_product_range($product->get_id());
+        $range_product_id = $product->get_id();
+        $range = $this->build_product_range($range_product_id);
         if (empty($range)) return;
 
         echo '<div class="dd-tab-content dd-product-range-tab">';
@@ -5223,16 +5378,16 @@ class Silvertell_Woocommerce_Customisation
             // Only show the sub-tab switcher when there's genuinely more than one group;
             // a lone "Extended Range" tab looks broken, so render its sections directly.
             if (count($range['groups']) > 1) {
-                $this->render_range_subtabs($range['groups']);
+                $this->render_range_subtabs($range['groups'], $range_product_id);
             } else {
                 foreach (reset($range['groups']) as $section) {
-                    $this->render_range_section($section);
+                    $this->render_range_section($section, $range_product_id);
                 }
             }
         }
 
         if (! empty($range['flat'])) {
-            $this->render_range_table($range['flat']);
+            $this->render_range_table($range['flat'], $range_product_id);
         }
 
         $template_id = $this->get_product_range_elementor_template_id($product->get_id());
@@ -5296,7 +5451,7 @@ class Silvertell_Woocommerce_Customisation
         } else {
             // Standalone product (no children): show itself if it carries spec/buy data.
             $self = wc_get_product($product_id);
-            if ($self && ($this->product_has_visible_attributes($self) || $this->render_provider_buttons($product_id) !== '')) {
+            if ($self && ($this->product_has_visible_attributes($self, $product_id) || $this->render_provider_buttons($product_id) !== '')) {
                 $flat[] = get_post($product_id);
             }
         }
@@ -5341,13 +5496,13 @@ class Silvertell_Woocommerce_Customisation
         return '';
     }
 
-    private function product_has_visible_attributes($product)
+    private function product_has_visible_attributes($product, $range_product_id = 0)
     {
         foreach ($product->get_attributes() as $attr_key => $attr) {
             if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) {
                 continue;
             }
-            if ($this->is_range_attribute_hidden($attr_key, $attr, $product)) {
+            if ($this->is_range_attribute_hidden($attr_key, $attr, $product, $range_product_id)) {
                 continue;
             }
             return true;
@@ -5355,7 +5510,7 @@ class Silvertell_Woocommerce_Customisation
         return false;
     }
 
-    private function render_range_subtabs($groups)
+    private function render_range_subtabs($groups, $range_product_id = 0)
     {
         $uid = 'dd-range-' . uniqid();
         echo '<div class="dd-range-tabs" id="' . esc_attr($uid) . '">';
@@ -5373,7 +5528,7 @@ class Silvertell_Woocommerce_Customisation
         foreach ($groups as $label => $sections) {
             echo '<div class="dd-range-panel' . ($first ? ' active' : '') . '" data-panel="' . esc_attr(sanitize_title($label)) . '">';
             foreach ($sections as $section) {
-                $this->render_range_section($section);
+                $this->render_range_section($section, $range_product_id);
             }
             echo '</div>';
             $first = false;
@@ -5382,14 +5537,14 @@ class Silvertell_Woocommerce_Customisation
         echo '</div>';
     }
 
-    private function render_range_section($section)
+    private function render_range_section($section, $range_product_id = 0)
     {
         echo '<div class="dd-range-section">';
         echo '<h3 class="dd-range-title">' . esc_html($section['title']) . '</h3>';
         if (trim($section['description']) !== '') {
             echo '<div class="dd-range-desc">' . wp_kses_post(wpautop($section['description'])) . '</div>';
         }
-        $this->render_range_table($section['variants']);
+        $this->render_range_table($section['variants'], $range_product_id);
         if (trim($section['note']) !== '') {
             echo '<p class="dd-range-note">' . esc_html($section['note']) . '</p>';
         }
@@ -5400,7 +5555,7 @@ class Silvertell_Woocommerce_Customisation
      * Render a variant table. Accepts an array of WP_Post objects or product IDs. Columns
      * are the union of the variants' visible attributes, plus a Buy Samples column.
      */
-    private function render_range_table($variants)
+    private function render_range_table($variants, $range_product_id = 0)
     {
         $products = [];
         foreach ($variants as $v) {
@@ -5415,7 +5570,7 @@ class Silvertell_Woocommerce_Customisation
         foreach ($products as $p) {
             foreach ($p->get_attributes() as $attr_key => $attr) {
                 if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) continue;
-                if ($this->is_range_attribute_hidden($attr_key, $attr, $p)) continue;
+                if ($this->is_range_attribute_hidden($attr_key, $attr, $p, $range_product_id)) continue;
                 $name = (is_object($attr) && method_exists($attr, 'get_name')) ? $attr->get_name() : $attr_key;
                 $attr_labels[$attr_key] = wc_attribute_label($name, $p);
             }
@@ -7519,6 +7674,16 @@ class Silvertell_Woocommerce_Customisation
                 update_post_meta($post_id, '_product_range_elementor_template', $template_id);
             } else {
                 delete_post_meta($post_id, '_product_range_elementor_template');
+            }
+        }
+
+        // 6. Save per-product hidden Product Range attributes.
+        if (isset($_POST['_hidden_range_attributes'])) {
+            $hidden = $this->sanitize_hidden_range_attributes_input(wp_unslash($_POST['_hidden_range_attributes']));
+            if (empty($hidden['taxonomies']) && empty($hidden['custom'])) {
+                delete_post_meta($post_id, '_hidden_range_attributes');
+            } else {
+                update_post_meta($post_id, '_hidden_range_attributes', $hidden);
             }
         }
     }

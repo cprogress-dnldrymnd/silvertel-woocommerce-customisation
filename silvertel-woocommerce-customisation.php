@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.62.0
+ * Version: 2.62.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -92,7 +92,6 @@ class Silvertell_Woocommerce_Customisation
 
         // Frontend Single Product Tabs (rendered by the native WC tabs / Elementor Product Data Tabs widget)
         add_filter('woocommerce_product_tabs', [$this, 'register_frontend_product_tabs'], 98);
-        add_filter('woocommerce_product_has_attributes', [$this, 'parent_has_child_attributes'], 10, 2);
         add_filter('woocommerce_display_product_attributes', [$this, 'merge_child_attributes_into_additional_info'], 10, 2);
         add_action('wp_footer', [$this, 'inject_frontend_assets']);
 
@@ -3631,6 +3630,16 @@ class Silvertell_Woocommerce_Customisation
 
         $product_id = $product->get_id();
 
+        // Modern WooCommerce no longer filters has_attributes(), so inject the tab when
+        // orderable variants carry specs but the parent product object has none of its own.
+        if (! isset($tabs['additional_information']) && $this->variants_have_additional_info($product_id)) {
+            $tabs['additional_information'] = [
+                'title'    => __('Additional information', 'woocommerce'),
+                'priority' => 100,
+                'callback' => 'woocommerce_product_additional_information_tab',
+            ];
+        }
+
         // NOTE: Features are no longer rendered as a product tab — they are output
         // via the dedicated "Product Features" Elementor widget (see
         // register_elementor_widgets()).
@@ -3680,28 +3689,24 @@ class Silvertell_Woocommerce_Customisation
         return $ids;
     }
 
-    /** Whether a product has at least one visible attribute (ignores Product Range hide rules). */
+    /** Whether a product has at least one visible, non-empty attribute (ignores Product Range hide rules). */
     private function variant_has_visible_attributes(WC_Product $product)
     {
-        foreach ($product->get_attributes() as $attr) {
+        foreach ($product->get_attributes() as $attr_key => $attr) {
             if (is_object($attr) && method_exists($attr, 'get_visible') && ! $attr->get_visible()) {
                 continue;
             }
-            return true;
+            if ($product->get_attribute($attr_key) !== '') {
+                return true;
+            }
         }
         return false;
     }
 
-    /**
-     * Show the Additional information tab when orderable variants carry specs even if the
-     * parent product object has no attributes of its own.
-     */
-    public function parent_has_child_attributes($has, $product)
+    /** Whether any orderable variant under a range parent has specs for Additional information. */
+    private function variants_have_additional_info($product_id)
     {
-        if ($has || ! $product instanceof WC_Product) {
-            return $has;
-        }
-        foreach ($this->get_range_variant_product_ids($product->get_id()) as $variant_id) {
+        foreach ($this->get_range_variant_product_ids($product_id) as $variant_id) {
             $variant = wc_get_product($variant_id);
             if ($variant && $this->variant_has_visible_attributes($variant)) {
                 return true;

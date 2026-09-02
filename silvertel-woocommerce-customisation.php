@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.60.0
+ * Version: 2.60.1
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -2482,6 +2482,160 @@ class Silvertell_Woocommerce_Customisation
     }
 
     /**
+     * Depth-first [ id, depth ] rows under a product, ordered by menu_order (matches Child Products list).
+     */
+    private function walk_product_tree($parent_id, $depth = 0)
+    {
+        $post = get_post((int) $parent_id);
+        if (! $post || $post->post_type !== 'product') {
+            return [];
+        }
+
+        $rows = [['id' => (int) $parent_id, 'depth' => (int) $depth]];
+
+        $children = get_children([
+            'post_parent' => (int) $parent_id,
+            'post_type'   => 'product',
+            'post_status' => ['publish', 'draft', 'pending', 'private', 'future'],
+            'numberposts' => -1,
+            'orderby'     => ['menu_order' => 'ASC', 'ID' => 'ASC'],
+        ]);
+
+        foreach ($children as $child) {
+            $rows = array_merge($rows, $this->walk_product_tree((int) $child->ID, $depth + 1));
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Tree-ordered rows for the attributes bulk list (parent → children, menu_order within each level).
+     */
+    private function get_attr_bulk_tree_rows($scope, $parent_id = 0)
+    {
+        $rows = [];
+
+        if ($parent_id) {
+            $rows = $this->walk_product_tree($parent_id, 0);
+            if ($scope === 'child') {
+                array_shift($rows);
+            }
+            return $rows;
+        }
+
+        $tops = get_posts([
+            'post_type'      => 'product',
+            'post_status'    => ['publish', 'draft', 'pending', 'private'],
+            'post_parent'    => 0,
+            'posts_per_page' => -1,
+            'orderby'        => 'title',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+        ]);
+
+        foreach ($tops as $top_id) {
+            $subtree = $this->walk_product_tree((int) $top_id, 0);
+            if ($scope === 'child') {
+                array_shift($subtree);
+            }
+            $rows = array_merge($rows, $subtree);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Whether a product passes the attributes bulk tool filters.
+     */
+    private function attr_bulk_product_matches_filters($product_id, $search, $category, $has_attribute, $attribute_type, $attribute_tax, $attribute_name)
+    {
+        $post = get_post($product_id);
+        if (! $post || $post->post_type !== 'product') {
+            return false;
+        }
+
+        if ($search !== '') {
+            $title_match = stripos($post->post_title, $search) !== false;
+            $sku_match   = false;
+            $product     = function_exists('wc_get_product') ? wc_get_product($product_id) : null;
+            if ($product) {
+                $sku = $product->get_sku();
+                if ($sku !== '' && stripos($sku, $search) !== false) {
+                    $sku_match = true;
+                }
+            }
+            if (! $title_match && ! $sku_match) {
+                if (! (function_exists('wc_get_product_id_by_sku') && wc_get_product_id_by_sku($search) === $product_id)) {
+                    return false;
+                }
+            }
+        }
+
+        if ($category) {
+            $terms = wp_get_post_terms($product_id, 'product_cat', ['fields' => 'ids']);
+            if (is_wp_error($terms)) {
+                return false;
+            }
+            $allowed = $this->collect_product_cat_descendant_ids($category);
+            if (! array_intersect(array_map('intval', $terms), $allowed)) {
+                return false;
+            }
+        }
+
+        if ($has_attribute) {
+            $product = function_exists('wc_get_product') ? wc_get_product($product_id) : null;
+            if ($attribute_type === 'global' && $attribute_tax) {
+                if (! $this->product_has_attribute($product, 'global', $attribute_tax)) {
+                    return false;
+                }
+            } elseif ($attribute_type === 'custom' && $attribute_name !== '') {
+                if (! $this->product_has_attribute($product, 'custom', '', $attribute_name)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Build one JSON row for the attributes bulk product table.
+     */
+    private function build_attr_bulk_product_row($id, $depth, $attribute_type, $attribute_tax, $attribute_name)
+    {
+        $product = function_exists('wc_get_product') ? wc_get_product($id) : null;
+        $post    = get_post($id);
+
+        $parent_label    = '';
+        $parent_edit_url = '';
+        if ($post && (int) $post->post_parent > 0) {
+            $immediate = get_post((int) $post->post_parent);
+            if ($immediate) {
+                $parent_label    = $immediate->post_title;
+                $parent_edit_url = get_edit_post_link((int) $post->post_parent, 'raw');
+            }
+        }
+
+        $current_value = '';
+        if ($attribute_type === 'global' && $attribute_tax) {
+            $current_value = $this->format_product_attribute_value($product, 'global', $attribute_tax);
+        } elseif ($attribute_type === 'custom' && $attribute_name !== '') {
+            $current_value = $this->format_product_attribute_value($product, 'custom', '', $attribute_name);
+        }
+
+        return [
+            'id'              => (int) $id,
+            'title'           => get_the_title($id),
+            'sku'             => $product ? $product->get_sku() : '',
+            'parent_label'    => $parent_label,
+            'parent_edit_url' => $parent_edit_url ?: '',
+            'depth'           => (int) $depth,
+            'current_value'   => $current_value,
+            'edit_url'        => get_edit_post_link($id, 'raw'),
+        ];
+    }
+
+    /**
      * Top-level products for the parent filter dropdown.
      */
     private function get_top_level_products_for_select()
@@ -2928,7 +3082,7 @@ class Silvertell_Woocommerce_Customisation
                     } else {
                         var rows = products.map(function(p) {
                             var checked = selected[p.id] ? ' checked' : '';
-                            var prefix = p.depth > 0 ? Array(p.depth + 1).join('— ') : '';
+                            var prefix = p.depth > 0 ? '— '.repeat(p.depth) : '';
                             var parentCell = p.parent_label ? '<a href="' + p.parent_edit_url + '" target="_blank">' + $('<div>').text(p.parent_label).html() + '</a>' : '—';
                             return '<tr><td><input type="checkbox" class="silvertell-attr-bulk-cb" value="' + p.id + '"' + checked + ' /></td>' +
                                 '<td><a href="' + p.edit_url + '" target="_blank">' + $('<div>').text(prefix + p.title).html() + '</a></td>' +
@@ -3127,128 +3281,110 @@ class Silvertell_Woocommerce_Customisation
             $attribute_type = 'global';
         }
 
-        $args = [
-            'post_type'      => 'product',
-            'post_status'    => ['publish', 'draft', 'pending', 'private'],
-            'posts_per_page' => $per_page,
-            'paged'          => $page,
-            'orderby'        => 'title',
-            'order'          => 'ASC',
-            'fields'         => 'ids',
-        ];
-
+        // Top-level only: flat title sort. All / child scopes: parent → children tree order.
         if ($scope === 'top') {
-            $args['post_parent'] = 0;
-        } elseif ($scope === 'child') {
-            $args['post_parent__not_in'] = [0];
-        }
+            $args = [
+                'post_type'      => 'product',
+                'post_status'    => ['publish', 'draft', 'pending', 'private'],
+                'post_parent'    => 0,
+                'posts_per_page' => $per_page,
+                'paged'          => $page,
+                'orderby'        => 'title',
+                'order'          => 'ASC',
+                'fields'         => 'ids',
+            ];
 
-        if ($parent_id) {
-            $tree_ids = $this->collect_product_descendant_ids($parent_id);
-            if (empty($tree_ids)) {
-                wp_send_json_success(['products' => [], 'total' => 0, 'page' => $page]);
+            if ($search !== '') {
+                $args['s'] = $search;
             }
-            $args['post__in'] = $tree_ids;
-        }
 
-        if ($search !== '') {
-            $args['s'] = $search;
-        }
+            $tax_query = [];
+            if ($category) {
+                $tax_query[] = [
+                    'taxonomy'         => 'product_cat',
+                    'field'            => 'term_id',
+                    'terms'            => [$category],
+                    'include_children' => true,
+                ];
+            }
+            if ($has_attribute && $attribute_type === 'global' && $attribute_tax && taxonomy_exists($attribute_tax)) {
+                $tax_query[] = [
+                    'taxonomy' => $attribute_tax,
+                    'operator' => 'EXISTS',
+                ];
+            }
+            if (! empty($tax_query)) {
+                $args['tax_query'] = count($tax_query) > 1 ? array_merge(['relation' => 'AND'], $tax_query) : $tax_query;
+            }
 
-        $tax_query = [];
-        if ($category) {
-            $tax_query[] = [
-                'taxonomy'         => 'product_cat',
-                'field'            => 'term_id',
-                'terms'            => [$category],
-                'include_children' => true,
-            ];
-        }
-        if ($has_attribute && $attribute_type === 'global' && $attribute_tax && taxonomy_exists($attribute_tax)) {
-            $tax_query[] = [
-                'taxonomy' => $attribute_tax,
-                'operator' => 'EXISTS',
-            ];
-        }
-        if (! empty($tax_query)) {
-            $args['tax_query'] = count($tax_query) > 1 ? array_merge(['relation' => 'AND'], $tax_query) : $tax_query;
-        }
+            $query = new WP_Query($args);
+            $ids   = $query->posts;
+            $total = (int) $query->found_posts;
 
-        $query = new WP_Query($args);
-        $ids   = $query->posts;
-        $total = (int) $query->found_posts;
-
-        if ($search !== '' && function_exists('wc_get_product_id_by_sku')) {
-            $sku_id = wc_get_product_id_by_sku($search);
-            if ($sku_id) {
-                $sku_post = get_post($sku_id);
-                if ($sku_post && $sku_post->post_type === 'product') {
-                    $in_scope = true;
-                    if ($scope === 'top' && (int) $sku_post->post_parent !== 0) {
-                        $in_scope = false;
-                    } elseif ($scope === 'child' && (int) $sku_post->post_parent === 0) {
-                        $in_scope = false;
-                    }
-                    if ($parent_id && ! in_array($sku_id, $this->collect_product_descendant_ids($parent_id), true)) {
-                        $in_scope = false;
-                    }
-                    if ($in_scope && ! in_array($sku_id, $ids, true)) {
-                        array_unshift($ids, $sku_id);
-                        $total++;
+            if ($search !== '' && function_exists('wc_get_product_id_by_sku')) {
+                $sku_id = wc_get_product_id_by_sku($search);
+                if ($sku_id) {
+                    $sku_post = get_post($sku_id);
+                    if ($sku_post && $sku_post->post_type === 'product' && (int) $sku_post->post_parent === 0) {
+                        if (! in_array($sku_id, $ids, true)) {
+                            array_unshift($ids, $sku_id);
+                            $total++;
+                        }
                     }
                 }
             }
-        }
 
-        $products = [];
-        foreach ($ids as $id) {
-            $product = function_exists('wc_get_product') ? wc_get_product($id) : null;
-            $post    = get_post($id);
-            if (! $post) {
-                continue;
+            $products = [];
+            foreach ($ids as $id) {
+                $product = function_exists('wc_get_product') ? wc_get_product($id) : null;
+                if ($has_attribute && $attribute_type === 'custom' && $attribute_name !== '') {
+                    if (! $this->product_has_attribute($product, 'custom', '', $attribute_name)) {
+                        continue;
+                    }
+                }
+                $products[] = $this->build_attr_bulk_product_row($id, 0, $attribute_type, $attribute_tax, $attribute_name);
             }
 
             if ($has_attribute && $attribute_type === 'custom' && $attribute_name !== '') {
-                if (! $this->product_has_attribute($product, 'custom', '', $attribute_name)) {
-                    continue;
-                }
+                $total = count($products);
             }
 
-            $parent_label    = '';
-            $parent_edit_url = '';
-            $depth           = 0;
-            if ((int) $post->post_parent > 0) {
-                $ancestors = get_post_ancestors($id);
-                $depth     = count($ancestors);
-                $immediate = get_post((int) $post->post_parent);
-                if ($immediate) {
-                    $parent_label    = $immediate->post_title;
-                    $parent_edit_url = get_edit_post_link((int) $post->post_parent, 'raw');
-                }
-            }
-
-            $current_value = '';
-            if ($attribute_type === 'global' && $attribute_tax) {
-                $current_value = $this->format_product_attribute_value($product, 'global', $attribute_tax);
-            } elseif ($attribute_type === 'custom' && $attribute_name !== '') {
-                $current_value = $this->format_product_attribute_value($product, 'custom', '', $attribute_name);
-            }
-
-            $products[] = [
-                'id'              => (int) $id,
-                'title'           => get_the_title($id),
-                'sku'             => $product ? $product->get_sku() : '',
-                'parent_label'    => $parent_label,
-                'parent_edit_url' => $parent_edit_url ?: '',
-                'depth'           => $depth,
-                'current_value'   => $current_value,
-                'edit_url'        => get_edit_post_link($id, 'raw'),
-            ];
+            wp_send_json_success([
+                'products' => $products,
+                'total'    => $total,
+                'page'     => $page,
+            ]);
         }
 
-        // Custom has_attribute filter may shrink the page; total is approximate for that case.
-        if ($has_attribute && $attribute_type === 'custom' && $attribute_name !== '') {
-            $total = count($products);
+        $tree_rows = $this->get_attr_bulk_tree_rows($scope, $parent_id);
+        $filtered  = [];
+        foreach ($tree_rows as $row) {
+            if ($this->attr_bulk_product_matches_filters(
+                $row['id'],
+                $search,
+                $category,
+                $has_attribute,
+                $attribute_type,
+                $attribute_tax,
+                $attribute_name
+            )) {
+                $filtered[] = $row;
+            }
+        }
+
+        $total  = count($filtered);
+        $offset = ($page - 1) * $per_page;
+        $slice  = array_slice($filtered, $offset, $per_page);
+
+        $products = [];
+        foreach ($slice as $row) {
+            $products[] = $this->build_attr_bulk_product_row(
+                $row['id'],
+                $row['depth'],
+                $attribute_type,
+                $attribute_tax,
+                $attribute_name
+            );
         }
 
         wp_send_json_success([

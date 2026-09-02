@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.62.2
+ * Version: 2.62.3
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -3599,6 +3599,13 @@ class Silvertell_Woocommerce_Customisation
         echo wp_kses_post(wc_help_tip(__('Optional. Shown below the Product Range table on this product\'s storefront tab. Leave as global default to use the template from Silvertell Settings.', 'silvertell-wc-customisation')));
         echo '</p>';
 
+        $footer_text = get_post_meta($post->ID, '_product_range_footer_text', true);
+        echo '<p class="form-field _product_range_footer_text_field">';
+        echo '<label for="_product_range_footer_text">' . esc_html__('Footer text', 'silvertell-wc-customisation') . '</label>';
+        echo '<textarea id="_product_range_footer_text" name="_product_range_footer_text" rows="4" class="dd-full-width">' . esc_textarea($footer_text) . '</textarea>';
+        echo wp_kses_post(wc_help_tip(__('Optional. Shown below the Product Range table on the storefront, before any Elementor template. Basic HTML is allowed.', 'silvertell-wc-customisation')));
+        echo '</p>';
+
         $product_hidden_range = self::normalize_hidden_range_attributes(get_post_meta($post->ID, '_hidden_range_attributes', true));
         echo '<p class="form-field _hidden_range_attributes_field">';
         echo '<label>' . esc_html__('Hidden attributes (this product)', 'silvertell-wc-customisation') . '</label>';
@@ -5395,6 +5402,13 @@ class Silvertell_Woocommerce_Customisation
             $this->render_range_table($range['flat'], $range_product_id);
         }
 
+        $footer_text = get_post_meta($product->get_id(), '_product_range_footer_text', true);
+        if (trim($footer_text) !== '') {
+            echo '<div class="dd-product-range-footer">';
+            echo wp_kses_post(wpautop($footer_text));
+            echo '</div>';
+        }
+
         $template_id = $this->get_product_range_elementor_template_id($product->get_id());
         if ($template_id) {
             $content = $this->render_elementor_template($template_id);
@@ -7175,6 +7189,11 @@ class Silvertell_Woocommerce_Customisation
                 margin-top: 8px;
             }
 
+            .dd-product-range-footer {
+                color: #50575e;
+                margin-top: 16px;
+            }
+
             .woocommerce-Tabs-panel>h2 {
                 display: none;
             }
@@ -7665,6 +7684,16 @@ class Silvertell_Woocommerce_Customisation
                 update_post_meta($post_id, '_product_range_elementor_template', $template_id);
             } else {
                 delete_post_meta($post_id, '_product_range_elementor_template');
+            }
+        }
+
+        // 5b. Save Product Range footer text.
+        if (isset($_POST['_product_range_footer_text'])) {
+            $footer_text = wp_kses_post(wp_unslash($_POST['_product_range_footer_text']));
+            if (trim($footer_text) === '') {
+                delete_post_meta($post_id, '_product_range_footer_text');
+            } else {
+                update_post_meta($post_id, '_product_range_footer_text', $footer_text);
             }
         }
 

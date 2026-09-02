@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.59.1
+ * Version: 2.60.0
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1216,6 +1216,77 @@ class Silvertell_Woocommerce_Customisation
         register_setting('silvertell_file_importer_group', 'silvertell_file_meta_keys');
         register_setting('silvertell_file_importer_group', 'silvertell_sample_providers', [$this, 'sanitize_sample_providers']);
         register_setting('silvertell_file_importer_group', 'silvertell_hidden_range_attributes', [$this, 'sanitize_hidden_range_attributes']);
+        register_setting('silvertell_file_importer_group', 'silvertell_product_range_elementor_template', [$this, 'sanitize_elementor_template_id']);
+    }
+
+    public function sanitize_elementor_template_id($input)
+    {
+        $id = absint($input);
+        if ($id === 0) return 0;
+        return $this->is_valid_elementor_template($id) ? $id : 0;
+    }
+
+    private function is_valid_elementor_template($template_id)
+    {
+        $template_id = absint($template_id);
+        if ($template_id === 0) return false;
+        $post = get_post($template_id);
+        return $post && $post->post_type === 'elementor_library' && $post->post_status === 'publish';
+    }
+
+    private function get_elementor_template_choices()
+    {
+        $posts = get_posts([
+            'post_type'   => 'elementor_library',
+            'post_status' => 'publish',
+            'numberposts' => -1,
+            'orderby'     => 'title',
+            'order'       => 'ASC',
+        ]);
+        $choices = [];
+        foreach ($posts as $post) {
+            $type  = get_post_meta($post->ID, '_elementor_template_type', true);
+            $label = $post->post_title;
+            if ($type) {
+                $label .= ' (' . $type . ')';
+            }
+            $choices[$post->ID] = $label;
+        }
+        return $choices;
+    }
+
+    private function get_product_range_elementor_template_id($product_id)
+    {
+        $per_product = absint(get_post_meta($product_id, '_product_range_elementor_template', true));
+        if ($per_product && $this->is_valid_elementor_template($per_product)) {
+            return $per_product;
+        }
+        $global = absint(get_option('silvertell_product_range_elementor_template', 0));
+        if ($global && $this->is_valid_elementor_template($global)) {
+            return $global;
+        }
+        return 0;
+    }
+
+    private function render_elementor_template($template_id)
+    {
+        if (! class_exists('\Elementor\Plugin')) return '';
+        if (! $this->is_valid_elementor_template($template_id)) return '';
+        return \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($template_id);
+    }
+
+    private function render_elementor_template_select($field_name, $selected, $empty_label)
+    {
+        $choices = $this->get_elementor_template_choices();
+        echo '<select name="' . esc_attr($field_name) . '" id="' . esc_attr($field_name) . '" class="regular-text" style="width: 100%; max-width: 480px;">';
+        echo '<option value="0">' . esc_html($empty_label) . '</option>';
+        foreach ($choices as $id => $label) {
+            echo '<option value="' . esc_attr($id) . '" ' . selected((int) $selected, (int) $id, false) . '>' . esc_html($label) . '</option>';
+        }
+        echo '</select>';
+        if (empty($choices)) {
+            echo '<p class="description">' . esc_html__('No published Elementor templates found. Create one under Templates in wp-admin.', 'silvertell-wc-customisation') . '</p>';
+        }
     }
 
     public function sanitize_sample_providers($input)
@@ -1321,9 +1392,10 @@ class Silvertell_Woocommerce_Customisation
         $current_keys     = get_option('silvertell_file_meta_keys', '_manual');
         $providers        = $this->get_sample_providers();
         $attr_choices     = $this->get_attribute_taxonomy_choices();
-        $hidden_range     = self::get_hidden_range_attributes();
+        $hidden_range      = self::get_hidden_range_attributes();
         $hidden_taxonomies = $hidden_range['taxonomies'];
         $hidden_custom     = implode(', ', $hidden_range['custom']);
+        $range_template    = absint(get_option('silvertell_product_range_elementor_template', 0));
         ?>
         <div class="wrap dd-panel-wrapper" style="padding:0 !important; max-width: 900px;">
             <h1>WooCommerce Advanced Customisations</h1>
@@ -1384,6 +1456,13 @@ class Silvertell_Woocommerce_Customisation
                             <td>
                                 <input type="text" id="silvertell_hidden_range_custom" name="silvertell_hidden_range_attributes[custom]" value="<?php echo esc_attr($hidden_custom); ?>" class="regular-text" style="width: 100%;">
                                 <p class="description"><?php esc_html_e('Comma-separated custom attribute names. Matches by attribute name or label (case-insensitive).', 'silvertell-wc-customisation'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="silvertell_product_range_elementor_template"><?php esc_html_e('Default Elementor template', 'silvertell-wc-customisation'); ?></label></th>
+                            <td>
+                                <?php $this->render_elementor_template_select('silvertell_product_range_elementor_template', $range_template, __('— None —', 'silvertell-wc-customisation')); ?>
+                                <p class="description"><?php esc_html_e('Rendered below the Product Range table on the storefront. Individual products can override this in the Product Range product tab.', 'silvertell-wc-customisation'); ?></p>
                             </td>
                         </tr>
                     </tbody>
@@ -3243,7 +3322,8 @@ class Silvertell_Woocommerce_Customisation
         $tabs['buy_samples'] = ['label' => __('Buy Samples', 'silvertell-wc-customisation'), 'target' => 'silvertell_buy_samples_data', 'class' => $all_types, 'priority' => 80];
         $tabs['documents']   = ['label' => __('Documents', 'silvertell-wc-customisation'), 'target' => 'silvertell_documents_data', 'class' => array_merge($all_types, ['dd-tab-docs']), 'priority' => 81];
         $tabs['features']    = ['label' => __('Features', 'silvertell-wc-customisation'), 'target' => 'silvertell_features_data', 'class' => array_merge($all_types, ['dd-tab-feats']), 'priority' => 82];
-        $tabs['eval_boards'] = ['label' => __('Evaluation Boards', 'silvertell-wc-customisation'), 'target' => 'silvertell_eval_boards_data', 'class' => $all_types, 'priority' => 83];
+        $tabs['eval_boards']    = ['label' => __('Evaluation Boards', 'silvertell-wc-customisation'), 'target' => 'silvertell_eval_boards_data', 'class' => $all_types, 'priority' => 83];
+        $tabs['product_range']  = ['label' => __('Product Range', 'silvertell-wc-customisation'), 'target' => 'silvertell_product_range_data', 'class' => $all_types, 'priority' => 84];
         return $tabs;
     }
 
@@ -3341,6 +3421,17 @@ class Silvertell_Woocommerce_Customisation
         echo wp_kses_post(wc_help_tip(__('Select multiple Evaluation Boards to link to this product.', 'silvertell-wc-customisation')));
         echo '</p>';
 
+        echo '</div></div>';
+
+        // Tab 5: Product Range — Elementor template below the range table on the storefront.
+        echo '<div id="silvertell_product_range_data" class="panel woocommerce_options_panel dd-panel-wrapper">';
+        echo '<div class="options_group" style="padding-top:15px;">';
+        $current_range_template = absint(get_post_meta($post->ID, '_product_range_elementor_template', true));
+        echo '<p class="form-field _product_range_elementor_template_field">';
+        echo '<label for="_product_range_elementor_template">' . esc_html__('Elementor template', 'silvertell-wc-customisation') . '</label>';
+        $this->render_elementor_template_select('_product_range_elementor_template', $current_range_template, __('— Use global default —', 'silvertell-wc-customisation'));
+        echo wp_kses_post(wc_help_tip(__('Optional. Shown below the Product Range table on this product\'s storefront tab. Leave as global default to use the template from Silvertell Settings.', 'silvertell-wc-customisation')));
+        echo '</p>';
         echo '</div></div>';
     }
 
@@ -5008,6 +5099,16 @@ class Silvertell_Woocommerce_Customisation
             $this->render_range_table($range['flat']);
         }
 
+        $template_id = $this->get_product_range_elementor_template_id($product->get_id());
+        if ($template_id) {
+            $content = $this->render_elementor_template($template_id);
+            if ($content !== '') {
+                echo '<div class="dd-product-range-elementor">';
+                echo $content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Elementor HTML
+                echo '</div>';
+            }
+        }
+
         echo '</div>';
     }
 
@@ -5831,6 +5932,10 @@ class Silvertell_Woocommerce_Customisation
 
             .woocommerce-tabs .woocommerce-Tabs-panel {
                 padding-top: 5px;
+            }
+
+            .dd-product-range-elementor {
+                margin-top: 2rem;
             }
 
             .shop-products-wrapper .product-cart-button {
@@ -7270,6 +7375,16 @@ class Silvertell_Woocommerce_Customisation
         update_post_meta($post_id, '_features', $final_features);
         $this->clear_dynamic_meta_keys($post_id, '_feature_');
         $this->clear_dynamic_meta_keys($post_id, '_featured_');
+
+        // 5. Save Product Range Elementor template override.
+        if (isset($_POST['_product_range_elementor_template'])) {
+            $template_id = $this->sanitize_elementor_template_id(wp_unslash($_POST['_product_range_elementor_template']));
+            if ($template_id) {
+                update_post_meta($post_id, '_product_range_elementor_template', $template_id);
+            } else {
+                delete_post_meta($post_id, '_product_range_elementor_template');
+            }
+        }
     }
 
     private function clear_dynamic_meta_keys($post_id, $prefix)

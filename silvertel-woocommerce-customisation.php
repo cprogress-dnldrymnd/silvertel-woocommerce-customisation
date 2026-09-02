@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Silvertell WooCommerce Customisations
  * Description: Custom modifications for WooCommerce, including dynamic file sideloading, CPT document generation, rock-solid hierarchical taxonomy building, native repeater fields, conditional UI sections, and Advanced AJAX Evaluation Board Importer.
- * Version: 2.62.3
+ * Version: 2.62.4
  * Author: Digitally Disruptive - Donald Raymundo
  * Author URI: https://digitallydisruptive.co.uk/
  * Text Domain: silvertell-wc-customisation
@@ -1424,6 +1424,43 @@ class Silvertell_Woocommerce_Customisation
         echo '<label for="' . esc_attr($custom_id) . '" style="display:block; font-weight:600; margin-bottom:4px;">' . esc_html__('Hidden custom attributes', 'silvertell-wc-customisation') . '</label>';
         echo '<input type="text" id="' . esc_attr($custom_id) . '" name="' . esc_attr($name_prefix) . '[custom]" value="' . esc_attr($hidden_custom) . '" class="regular-text" style="width:100%; max-width:480px;">';
         echo '<p class="description">' . esc_html__('Comma-separated custom attribute names. Matches by attribute name or label (case-insensitive).', 'silvertell-wc-customisation') . '</p>';
+    }
+
+    /**
+     * WooCommerce product-data fields for per-product hidden Product Range attributes.
+     * Uses the same multi-select + text-field pattern as Documents / Evaluation Boards.
+     *
+     * @param string $name_prefix  e.g. _hidden_range_attributes
+     * @param array  $hidden_range ['taxonomies' => [], 'custom' => []]
+     */
+    private function render_hidden_range_attribute_product_fields($name_prefix, array $hidden_range)
+    {
+        $attr_choices      = $this->get_attribute_taxonomy_choices();
+        $hidden_taxonomies = $hidden_range['taxonomies'];
+        $hidden_custom     = implode(', ', $hidden_range['custom']);
+        $tax_field_id      = $name_prefix . '_taxonomies';
+        $custom_field_id   = $name_prefix . '_custom';
+
+        echo '<p class="form-field ' . esc_attr($name_prefix) . '_taxonomies_field">';
+        echo '<label for="' . esc_attr($tax_field_id) . '">' . esc_html__('Hidden global attributes', 'silvertell-wc-customisation') . '</label>';
+        if (empty($attr_choices)) {
+            echo '<span class="description">' . esc_html__('No global WooCommerce attributes are registered yet.', 'silvertell-wc-customisation') . '</span>';
+        } else {
+            echo '<select id="' . esc_attr($tax_field_id) . '" name="' . esc_attr($name_prefix) . '[taxonomies][]" class="wc-enhanced-select" multiple="multiple" style="width: 50%;">';
+            foreach ($attr_choices as $slug => $label) {
+                $selected = in_array($slug, $hidden_taxonomies, true) ? 'selected="selected"' : '';
+                echo '<option value="' . esc_attr($slug) . '" ' . $selected . '>' . esc_html($label) . '</option>';
+            }
+            echo '</select>';
+        }
+        echo wp_kses_post(wc_help_tip(__('Global attributes to hide on this product\'s Product Range tab. Merged with the site-wide list in Silvertell Settings.', 'silvertell-wc-customisation')));
+        echo '</p>';
+
+        echo '<p class="form-field ' . esc_attr($name_prefix) . '_custom_field">';
+        echo '<label for="' . esc_attr($custom_field_id) . '">' . esc_html__('Hidden custom attributes', 'silvertell-wc-customisation') . '</label>';
+        echo '<input type="text" id="' . esc_attr($custom_field_id) . '" name="' . esc_attr($name_prefix) . '[custom]" value="' . esc_attr($hidden_custom) . '" class="short" style="width: 50%;">';
+        echo wp_kses_post(wc_help_tip(__('Comma-separated custom attribute names. Matches by attribute name or label (case-insensitive). Merged with the site-wide list in Silvertell Settings.', 'silvertell-wc-customisation')));
+        echo '</p>';
     }
 
     private static function get_sample_providers()
@@ -3607,11 +3644,7 @@ class Silvertell_Woocommerce_Customisation
         echo '</p>';
 
         $product_hidden_range = self::normalize_hidden_range_attributes(get_post_meta($post->ID, '_hidden_range_attributes', true));
-        echo '<p class="form-field _hidden_range_attributes_field">';
-        echo '<label>' . esc_html__('Hidden attributes (this product)', 'silvertell-wc-customisation') . '</label>';
-        $this->render_hidden_range_attribute_inputs('_hidden_range_attributes', $product_hidden_range, '_hidden_range_attributes_custom');
-        echo wp_kses_post(wc_help_tip(__('Additional attributes to hide on this product\'s Product Range tab. These are merged with the site-wide list in Silvertell Settings.', 'silvertell-wc-customisation')));
-        echo '</p>';
+        $this->render_hidden_range_attribute_product_fields('_hidden_range_attributes', $product_hidden_range);
         echo '</div></div>';
     }
 
@@ -5290,11 +5323,6 @@ class Silvertell_Woocommerce_Customisation
 
         if (trim($post->post_content) !== '') {
             echo '<div class="dd-eb-desc">' . wp_kses_post(wpautop($post->post_content)) . '</div>';
-        }
-
-        $notes = get_post_meta($eb_id, '_notes', true);
-        if (! empty($notes)) {
-            echo '<div class="dd-eb-notes">' . wp_kses_post(wpautop($notes)) . '</div>';
         }
 
         $manual     = get_post_meta($eb_id, '_manual', true);
